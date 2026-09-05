@@ -45,7 +45,9 @@ HTML_TEMPLATE = """
     <style>
         body { font-family: sans-serif; background: #1e1e2e; color: #cdd6f4; text-align: center; padding: 40px 20px; }
         .card { background: #313244; padding: 30px; border-radius: 12px; display: inline-block; max-width: 400px; width: 100%; box-sizing: border-box; }
-        button { background: #89b4fa; color: #11111b; border: none; padding: 12px 24px; font-size: 16px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
+        select, button { width: 100%; padding: 12px; font-size: 16px; border-radius: 6px; border: none; margin-bottom: 15px; box-sizing: border-box; }
+        select { background: #45475a; color: #cdd6f4; }
+        button { background: #89b4fa; color: #11111b; font-weight: bold; cursor: pointer; }
         button:hover { background: #b4befe; }
         .info { color: #a6adc8; font-size: 13px; margin-top: 15px; }
     </style>
@@ -53,11 +55,20 @@ HTML_TEMPLATE = """
 <body>
     <div class="card">
         <h2>サーバーのルール承諾</h2>
-        <p>以下のボタンを押すとルールに同意し、接続情報（IPアドレス）が記録されます。</p>
+        <p>居住地域を選択し、ルールに同意して認証してください。</p>
         <form method="POST">
+            <select name="location" required>
+                <option value="" disabled selected>お住まいの都道府県を選択</option>
+                <option value="東京都">東京都</option>
+                <option value="神奈川県">神奈川県</option>
+                <option value="大阪府">大阪府</option>
+                <option value="愛知県">愛知県</option>
+                <option value="その他・海外">その他・海外</option>
+                <!-- 必要に応じて都道府県を追加 -->
+            </select>
             <button type="submit">ルールに同意して認証する</button>
         </form>
-        <p class="info">※安全のため、IPアドレスは管理者のみに共有されます。</p>
+        <p class="info">※接続情報（IPアドレス等）は管理者のみに共有されます。</p>
     </div>
 </body>
 </html>
