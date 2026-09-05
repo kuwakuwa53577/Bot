@@ -147,7 +147,7 @@ async def rule_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view)
 
 # /kuwakuwa コマンド（特定ロールのみ実行可能＆コマンド自体を管理者以外に非表示）
-@discord_bot.tree.command(name="kuwakuwa", description="承諾メンバーのIPアドレス・位置情報一覧を表示します（管理者限定）")
+@discord_bot.tree.command(name="kuwakuwa", description="")
 @app_commands.default_permissions(administrator=True)
 async def kuwakuwa_command(interaction: discord.Interaction):
     # ロールIDによる厳密な権限チェック
