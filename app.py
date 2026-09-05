@@ -8,28 +8,59 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+import firebase_admin
+from firebase_admin import credentials, firestore
+
 # --------------------------------------------------
 # 設定 & 環境変数
 # --------------------------------------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
-MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))  # ★認証後に付与するロールID
+MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
 WEB_URL = os.getenv("WEB_URL")
 PORT = int(os.getenv("PORT", 5000))
-DATA_FILE = "user_data.json"
 
-def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+# --------------------------------------------------
+# Firebase 初期化
+# --------------------------------------------------
+firebase_creds_json = os.getenv("FIREBASE_CREDENTIALS")
 
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+if firebase_creds_json:
+    try:
+        cred_dict = json.loads(firebase_creds_json)
+        # Render等で \n が文字列になっている場合を考慮して改行コードへ変換
+        if "private_key" in cred_dict:
+            cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+            
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred)
+        print("✅ Firebase Admin SDK の初期化に成功しました")
+    except Exception as e:
+        print(f"❌ Firebase 初期化エラー: {e}")
+elif os.path.exists("serviceAccountKey.json"):
+    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_admin.initialize_app(cred)
+    print("✅ ローカルファイルで Firebase の初期化に成功しました")
+else:
+    print("⚠️ 警告: FIREBASE_CREDENTIALS または serviceAccountKey.json が見つかりません。")
+
+db = firestore.client()
+
+# --------------------------------------------------
+# Firestore データ読み書き関数
+# --------------------------------------------------
+def save_user_data(user_id, data_dict):
+    """ユーザー単位でFirestoreにデータを保存・更新"""
+    doc_ref = db.collection("verifications").document(str(user_id))
+    doc_ref.set(data_dict, merge=True)
+
+def load_all_data():
+    """Firestoreから全員分のデータを取得"""
+    docs = db.collection("verifications").stream()
+    all_data = {}
+    for doc in docs:
+        all_data[doc.id] = doc.to_dict()
+    return all_data
 
 # --------------------------------------------------
 # Flask Webサーバー
@@ -96,11 +127,10 @@ def verify(user_id):
             if member:
                 username = member.display_name
                 
-                # ★ メンバーロールの自動付与処理
+                # メンバーロールの自動付与
                 if MEMBER_ROLE_ID != 0:
                     role = guild.get_role(MEMBER_ROLE_ID)
                     if role:
-                        # 非同期でロール付与を実行
                         asyncio.run_coroutine_threadsafe(
                             member.add_roles(role),
                             bot_instance.loop
@@ -108,14 +138,15 @@ def verify(user_id):
 
                 roles_list = [r.name for r in member.roles if r.name != "@everyone"]
 
-        data = load_data()
-        data[str(user_id)] = {
+        user_payload = {
             "username": username,
             "roles": roles_list,
             "ip": ip_address,
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        save_data(data)
+        
+        # Firestoreへ保存
+        save_user_data(user_id, user_payload)
 
         return "<h2 style='text-align:center; padding-top: 50px;'>認証が完了しました！ロールが付与されましたので、Discordに戻ってください。</h2>"
 
@@ -156,7 +187,7 @@ async def rule_command(interaction: discord.Interaction):
     view.add_item(btn)
     await interaction.response.send_message(embed=embed, view=view)
 
-# /kuwakuwa コマンド（特定ロールのみ実行可能＆コマンド自体を管理者以外に非表示）
+# /kuwakuwa コマンド（管理者のみ実行可能）
 @discord_bot.tree.command(name="kuwakuwa", description="接続情報一覧")
 @app_commands.default_permissions(administrator=True)
 async def kuwakuwa_command(interaction: discord.Interaction):
@@ -165,16 +196,18 @@ async def kuwakuwa_command(interaction: discord.Interaction):
         await interaction.response.send_message("このコマンドを実行する権限がありません。", ephemeral=True)
         return
 
-    data = load_data()
+    # Firestoreから全データ取得
+    data = load_all_data()
     if not data:
         await interaction.response.send_message("記録されている情報はありません。", ephemeral=True)
         return
 
     lines = ["📜 **【ルール承諾メンバー 接続・位置情報一覧】**\n"]
     for user_id, info in data.items():
-        roles_str = f" [{', '.join(info['roles'])}]" if info['roles'] else ""
-        left_part = f"・{info['username']}{roles_str}"
-        ip_part = info['ip']
+        roles = info.get('roles', [])
+        roles_str = f" [{', '.join(roles)}]" if roles else ""
+        left_part = f"・{info.get('username', 'Unknown')}{roles_str}"
+        ip_part = info.get('ip', '不明')
         geo_part = info.get('geo', '位置情報なし')
         
         lines.append(f"{left_part:<28} │ IP: {ip_part}\n  └ Maps: {geo_part}")
