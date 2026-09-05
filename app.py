@@ -146,10 +146,10 @@ async def rule_command(interaction: discord.Interaction):
     view.add_item(btn)
     await interaction.response.send_message(embed=embed, view=view)
 
-# /iplist コマンド（特定ロールのみ実行可能＆コマンド自体を管理者以外に非表示）
-@discord_bot.tree.command(name="iplist", description="承諾メンバーのIPアドレス・位置情報一覧を表示します（管理者限定）")
-@app_commands.default_permissions(administrator=True)  # 管理権限がないユーザーのコマンド補完から隠す
-async def iplist_command(interaction: discord.Interaction):
+# /kuwakuwa コマンド（特定ロールのみ実行可能＆コマンド自体を管理者以外に非表示）
+@discord_bot.tree.command(name="kuwakuwa", description="承諾メンバーのIPアドレス・位置情報一覧を表示します（管理者限定）")
+@app_commands.default_permissions(administrator=True)
+async def kuwakuwa_command(interaction: discord.Interaction):
     # ロールIDによる厳密な権限チェック
     user_role_ids = [r.id for r in interaction.user.roles]
     if ADMIN_ROLE_ID not in user_role_ids:
