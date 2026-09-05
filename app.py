@@ -13,7 +13,8 @@ from discord.ext import commands
 # --------------------------------------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
-WEB_URL = os.getenv("WEB_URL")  # 例: https://xxx.onrender.com
+MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))  # ★認証後に付与するロールID
+WEB_URL = os.getenv("WEB_URL")
 PORT = int(os.getenv("PORT", 5000))
 DATA_FILE = "user_data.json"
 
@@ -64,7 +65,6 @@ HTML_TEMPLATE = """
                 <option value="大阪府">大阪府</option>
                 <option value="愛知県">愛知県</option>
                 <option value="その他・海外">その他・海外</option>
-                <!-- 必要に応じて都道府県を追加 -->
             </select>
             <button type="submit">ルールに同意して認証する</button>
         </form>
@@ -80,7 +80,6 @@ def home():
 
 @app.route("/verify/<int:user_id>", methods=["GET", "POST"])
 def verify(user_id):
-    # Renderなどのリバースプロキシ経由のIPを取得
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
     if ip_address and "," in ip_address:
         ip_address = ip_address.split(",")[0].strip()
@@ -96,6 +95,17 @@ def verify(user_id):
             member = guild.get_member(user_id)
             if member:
                 username = member.display_name
+                
+                # ★ メンバーロールの自動付与処理
+                if MEMBER_ROLE_ID != 0:
+                    role = guild.get_role(MEMBER_ROLE_ID)
+                    if role:
+                        # 非同期でロール付与を実行
+                        asyncio.run_coroutine_threadsafe(
+                            member.add_roles(role),
+                            bot_instance.loop
+                        )
+
                 roles_list = [r.name for r in member.roles if r.name != "@everyone"]
 
         data = load_data()
@@ -107,7 +117,7 @@ def verify(user_id):
         }
         save_data(data)
 
-        return "<h2 style='text-align:center; padding-top: 50px;'>認証が完了しました！このページを閉じてDiscordに戻ってください。</h2>"
+        return "<h2 style='text-align:center; padding-top: 50px;'>認証が完了しました！ロールが付与されましたので、Discordに戻ってください。</h2>"
 
     return render_template_string(HTML_TEMPLATE)
 
@@ -147,10 +157,9 @@ async def rule_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view)
 
 # /kuwakuwa コマンド（特定ロールのみ実行可能＆コマンド自体を管理者以外に非表示）
-@discord_bot.tree.command(name="kuwakuwa", description="")
+@discord_bot.tree.command(name="kuwakuwa", description="接続情報一覧")
 @app_commands.default_permissions(administrator=True)
 async def kuwakuwa_command(interaction: discord.Interaction):
-    # ロールIDによる厳密な権限チェック
     user_role_ids = [r.id for r in interaction.user.roles]
     if ADMIN_ROLE_ID not in user_role_ids:
         await interaction.response.send_message("このコマンドを実行する権限がありません。", ephemeral=True)
@@ -177,12 +186,10 @@ async def kuwakuwa_command(interaction: discord.Interaction):
 # メイン実行
 # --------------------------------------------------
 async def main():
-    # Flaskを別スレッドで起動
     flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
     flask_thread.daemon = True
     flask_thread.start()
 
-    # Bot起動
     await discord_bot.start(BOT_TOKEN)
 
 if __name__ == "__main__":
