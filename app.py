@@ -11,10 +11,6 @@ from discord.ext import commands
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-@app.route("/ping")
-def ping():
-    return "pong", 200
-
 # --------------------------------------------------
 # 設定 & 環境変数
 # --------------------------------------------------
@@ -70,6 +66,10 @@ def load_all_data():
 # Flask Webサーバー
 # --------------------------------------------------
 app = Flask(__name__)
+
+@app.route("/ping")
+def ping():
+    return "pong", 200
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
