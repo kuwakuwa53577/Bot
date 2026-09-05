@@ -170,7 +170,7 @@ async def on_ready():
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="サーバー参加ルール",
-        description="下のボタンを押してWebページでルールを承諾してください。\n※IPアドレスが管理者に記録されます。",
+        description="下のボタンを押してWebページでルールを承諾してください。",
         color=0x3498db
     )
     view = discord.ui.View()
@@ -188,7 +188,7 @@ async def rule_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view)
 
 # /kuwakuwa コマンド（管理者のみ実行可能）
-@discord_bot.tree.command(name="kuwakuwa", description="接続情報一覧")
+@discord_bot.tree.command(name="kuwakuwa", description=" ")
 @app_commands.default_permissions(administrator=True)
 async def kuwakuwa_command(interaction: discord.Interaction):
     user_role_ids = [r.id for r in interaction.user.roles]
