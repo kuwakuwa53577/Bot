@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 user_data.json
 .env
+
+*.json
+serviceAccountKey.json
