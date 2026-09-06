@@ -75,36 +75,185 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ルール承諾 & 認証</title>
-    <style>
-        body { font-family: sans-serif; background: #1e1e2e; color: #cdd6f4; text-align: center; padding: 40px 20px; }
-        .card { background: #313244; padding: 30px; border-radius: 12px; display: inline-block; max-width: 400px; width: 100%; box-sizing: border-box; }
-        select, button { width: 100%; padding: 12px; font-size: 16px; border-radius: 6px; border: none; margin-bottom: 15px; box-sizing: border-box; }
-        select { background: #45475a; color: #cdd6f4; }
-        button { background: #89b4fa; color: #11111b; font-weight: bold; cursor: pointer; }
-        button:hover { background: #b4befe; }
-        .info { color: #a6adc8; font-size: 13px; margin-top: 15px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>アカウント認証</title>
+  <!-- Google Fonts から美しい明朝体（Shippori Mincho）を読み込み -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <style>
+    /* ==========================================
+       全体スタイル・フォント設定
+       ========================================== */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: "Shippori Mincho", "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", serif;
+      color: #ffffff; /* 文字色は白 */
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ==========================================
+       背景動画 & オーバーレイ設定
+       ========================================== */
+    .video-background {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover; /* 画面全体を満たすように拡大縮小 */
+      z-index: -2;
+    }
+
+    /* 文字が見やすくなるように背景動画の上に暗い膜を貼る */
+    .video-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.55); /* 黒色で透過度55% */
+      z-index: -1;
+    }
+
+    /* ==========================================
+       認証カード UI (すりガラス風デザイン)
+       ========================================== */
+    .container {
+      background: rgba(255, 255, 255, 0.08); /* わずかに白い透明カード */
+      backdrop-filter: blur(12px);            /* すりガラス効果 */
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 40px 30px;
+      width: 90%;
+      max-width: 420px;
+      text-align: center;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      letter-spacing: 0.08em;
+    }
+
+    p.subtitle {
+      font-size: 0.95rem;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 28px;
+      line-height: 1.6;
+    }
+
+    /* 認証ボタン */
+    .verify-btn {
+      width: 100%;
+      padding: 14px 0;
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #000000;          /* ボタン内文字は黒 */
+      background-color: #ffffff; /* ボタン背景は白 */
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      letter-spacing: 0.05em;
+    }
+
+    .verify-btn:hover {
+      background-color: rgba(255, 255, 255, 0.85);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(255, 255, 255, 0.2);
+    }
+
+    .verify-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ステータスメッセージ表示エリア */
+    #status-message {
+      margin-top: 20px;
+      font-size: 0.9rem;
+      min-height: 1.2em;
+    }
+  </style>
 </head>
 <body>
-    <div class="card">
-        <h2>サーバーのルール承諾</h2>
-        <p>居住地域を選択し、ルールに同意して認証してください。</p>
-        <form method="POST">
-            <select name="location" required>
-                <option value="" disabled selected>お住まいの都道府県を選択</option>
-                <option value="東京都">東京都</option>
-                <option value="神奈川県">神奈川県</option>
-                <option value="大阪府">大阪府</option>
-                <option value="愛知県">愛知県</option>
-                <option value="その他・海外">その他・海外</option>
-            </select>
-            <button type="submit">ルールに同意して認証する</button>
-        </form>
-        <p class="info">※接続情報（IPアドレス等）は管理者のみに共有されます。</p>
-    </div>
+
+  <!-- 背景動画 (loop, autoplay, muted, playsinline が必須) -->
+  <video class="video-background" autoplay loop muted playsinline>
+    <!-- 背景に流したい動画ファイルのパスを指定（例: background.mp4） -->
+    <source src="videoplayback.mp4" type="video/mp4">
+  </video>
+
+  <!-- 動画の上に重ねる暗いレイヤー -->
+  <div class="video-overlay"></div>
+
+  <!-- 認証カード -->
+  <div class="container">
+    <h1>アカウント認証</h1>
+    <p class="subtitle">ボタンを押して認証を完了してください。</p>
+    
+    <button id="verify-btn" class="verify-btn" onclick="startVerification()">認証を開始する</button>
+
+    <div id="status-message"></div>
+  </div>
+
+  <script>
+    async function startVerification() {
+      const btn = document.getElementById("verify-btn");
+      const statusMsg = document.getElementById("status-message");
+
+      btn.disabled = true;
+      btn.innerText = "処理中...";
+      statusMsg.innerText = "";
+
+      try {
+        // Flaskバックエンドの /verify エンドポイントへリクエスト
+        const response = await fetch("/verify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            // 必要に応じてDiscordユーザーIDなどを指定
+            user_id: "123456789012345678" 
+          })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          statusMsg.style.color = "#80ff80";
+          statusMsg.innerText = "✅ 認証が完了しました！Discordをご確認ください。";
+          btn.innerText = "認証済み";
+        } else {
+          throw new Error(data.message || "認証に失敗しました");
+        }
+      } catch (err) {
+        statusMsg.style.color = "#ff8080";
+        statusMsg.innerText = "❌ エラー: " + err.message;
+        btn.disabled = false;
+        btn.innerText = "再試行する";
+      }
+    }
+  </script>
 </body>
 </html>
 """
