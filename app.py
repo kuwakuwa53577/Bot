@@ -253,12 +253,10 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
-# 👇 ユーザーインストール（外部アプリ）としてアカウントに直接追加することを許可
 @app_commands.allowed_installs(guilds=True, users=True)
-# 👇 実行場所（Botのいないサーバー、DM、グループチャットなど）をすべて許可
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def wake_up_command(interaction: discord.Interaction):
-    # --- 実行権限チェック ---
+    # 実行権限チェック
     if interaction.user.id != ADMIN_USER_ID:
         user_role_ids = [r.id for r in getattr(interaction.user, 'roles', [])]
         if ADMIN_ROLE_ID not in user_role_ids:
@@ -279,67 +277,28 @@ async def wake_up_command(interaction: discord.Interaction):
         f"{spam_mentions}\n<@everyone>",
         f"{spam_mentions}\n<@everyone>",
         f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
         f"{spam_mentions}\n<@everyone>"
     ]
 
     image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
 
-    for i in range(20):
+    for i in range(min(10, len(wake_messages))):
         try:
             embed = discord.Embed(
-                title=f"🚨 うおｗうおｗうおｗ ({i+1}/20)",
+                title=f"🚨 うおｗうおｗうおｗ ({i+1}/10)",
                 description=wake_messages[i],
                 color=discord.Color.red()
             )
             embed.set_thumbnail(url=image_url)
             
-            await interaction.channel.send(content="@everyone 🚨🚨🚨", embed=embed)
+            # 💡 interaction.channel.send ではなく followup.send を使用
+            await interaction.followup.send(content="@everyone 🚨🚨🚨", embed=embed)
             
             await asyncio.sleep(2.5)
         except Exception as e:
-            print(f"目覚まし送信エラー: {e}")
+            # Renderのログでエラー内容を確認できるように詳細を出力
+            print(f"❌ 目覚まし送信エラー [回数 {i+1}]: {e}")
             break
-
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(title="サーバー参加ルール", description="下のボタンを押してWebページでルールを承諾してください。", color=0x3498db)
