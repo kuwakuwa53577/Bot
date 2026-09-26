@@ -265,7 +265,6 @@ async def wake_up_command(interaction: discord.Interaction, count: int = 10):
             await interaction.response.send_message("❌ このコマンドを実行する権限がありません。", ephemeral=True)
             return
 
-    # 回数の制限（上限）を撤廃（1回以上であればいくらでも指定可能）
     count = max(1, count)
 
     await interaction.response.send_message(f"⏰ おぜうモードでeveryoneへの通知を {count} 回送信開始します…！", ephemeral=True)
@@ -297,23 +296,29 @@ async def wake_up_command(interaction: discord.Interaction, count: int = 10):
             )
             embed.set_thumbnail(url=image_url)
             
-            await interaction.followup.send(
-                content="@everyone 🚨🚨🚨", 
-                embed=embed,
-                allowed_mentions=allowed_mentions
-            )
+            # 1回目は followup、2回目以降は channel.send または followup を柔軟に使用
+            if interaction.channel:
+                await interaction.channel.send(
+                    content="@everyone 🚨🚨🚨", 
+                    embed=embed,
+                    allowed_mentions=allowed_mentions
+                )
+            else:
+                await interaction.followup.send(
+                    content="@everyone 🚨🚨🚨", 
+                    embed=embed,
+                    allowed_mentions=allowed_mentions
+                )
             
-            # 回数が多くなってもAPIブロック（429エラー）を受けないように待機時間を確保
-            await asyncio.sleep(3.5)
+            await asyncio.sleep(2.5)
 
         except discord.errors.HTTPException as e:
             if e.status == 429:
-                # レート制限にかかった場合は少し長めに待機して自動復帰・継続する
-                print(f"⚠️ レート制限検知 (429)。5秒待機後に再行します...")
+                print(f"⚠️ レート制限検知 (429)。5秒待機後に再試行します...")
                 await asyncio.sleep(5.0)
             else:
                 print(f"❌ HTTPエラー発生 [{e.status}]: {e}")
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(2.5)
         except Exception as e:
             print(f"❌ 目覚まし送信エラー [回数 {i+1}]: {e}")
             break
