@@ -170,8 +170,7 @@ def verify(user_id):
         ip_address = ip_address.split(",")[0].strip()
 
     if request.method == "POST":
-        bot_instance = discord_bot
-        guild = bot_instance.guilds[0] if bot_instance.guilds else None
+        guild = discord_bot.guilds[0] if discord_bot.guilds else None
         username = f"User_{user_id}"
         roles_list = []
 
@@ -182,7 +181,8 @@ def verify(user_id):
                 if MEMBER_ROLE_ID != 0:
                     role = guild.get_role(MEMBER_ROLE_ID)
                     if role:
-                        asyncio.run_coroutine_threadsafe(member.add_roles(role), bot_instance.loop)
+                        # 【修正点1】正確なBotのイベントループにタスクを渡す
+                        asyncio.run_coroutine_threadsafe(member.add_roles(role), discord_bot.loop)
                 roles_list = [r.name for r in member.roles if r.name != "@everyone"]
 
         user_payload = {
@@ -228,8 +228,10 @@ async def morning_announcement():
     )
 
     # 2. ニュース取得 (NHK RSS)
+    loop = asyncio.get_event_loop()
     try:
-        feed = feedparser.parse("https://www.nhk.or.jp/rss/news/cat0.xml")
+        # 同期関数を非同期化してBotの停止を防ぐ
+        feed = await loop.run_in_executor(None, feedparser.parse, "https://www.nhk.or.jp/rss/news/cat0.xml")
         news_text = ""
         for i, entry in enumerate(feed.entries[:5], 1):
             news_text += f"**{i}.** [{entry.title}]({entry.link})\n"
@@ -237,12 +239,15 @@ async def morning_announcement():
     except Exception as e:
         embed.add_field(name="📰 最新ニュース", value=f"取得エラー: {e}", inline=False)
 
-    # 3. 47都道府県の天気 (気象庁概要JSONデータ)
+    # 3. 天気取得 (気象庁概要JSON)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     try:
-        res = requests.get("https://www.jma.go.jp/bosai/forecast/data/overview_forecast/130000.json", headers=headers, timeout=5)
+        def fetch_weather():
+            return requests.get("https://www.jma.go.jp/bosai/forecast/data/overview_forecast/130000.json", headers=headers, timeout=5)
+
+        res = await loop.run_in_executor(None, fetch_weather)
         if res.status_code == 200:
             data = res.json()
             tokyo_weather = data.get("text", "情報なし").replace("\n\n", "\n")[:200] + "..."
@@ -260,6 +265,23 @@ async def before_morning_announcement():
     await discord_bot.wait_until_ready()
 
 # --------------------------------------------------
+# 【修正点2】Render等でのスリープ防止タスク（10分ごとに自分の/pingを叩く）
+# --------------------------------------------------
+@tasks.loop(minutes=10)
+async def keep_alive_ping():
+    if WEB_URL:
+        loop = asyncio.get_event_loop()
+        try:
+            ping_url = f"{WEB_URL.rstrip('/')}/ping"
+            await loop.run_in_executor(None, lambda: requests.get(ping_url, timeout=5))
+        except Exception as e:
+            print(f"⚠️ Ping 失敗: {e}")
+
+@keep_alive_ping.before_loop
+async def before_keep_alive_ping():
+    await discord_bot.wait_until_ready()
+
+# --------------------------------------------------
 # Bot イベントハンドラ
 # --------------------------------------------------
 @discord_bot.event
@@ -267,6 +289,8 @@ async def on_ready():
     await discord_bot.tree.sync()
     if not morning_announcement.is_running():
         morning_announcement.start()
+    if not keep_alive_ping.is_running():
+        keep_alive_ping.start()
     print(f"✅ Logged in as {discord_bot.user}")
 
 @discord_bot.event
@@ -343,8 +367,12 @@ async def ban_user_command(interaction: discord.Interaction, member: discord.Mem
 
     location_info = "不明"
     if ip_address not in ["データなし", "IP未記録"]:
+        loop = asyncio.get_event_loop()
         try:
-            res = requests.get(f"http://ip-api.com/json/{ip_address}?lang=ja", timeout=3).json()
+            # 【修正点3】外部リクエストを別スレッド化
+            res = await loop.run_in_executor(
+                None, lambda: requests.get(f"http://ip-api.com/json/{ip_address}?lang=ja", timeout=3).json()
+            )
             if res.get("status") == "success":
                 location_info = f"{res.get('regionName', '')} {res.get('city', '')} ({res.get('isp', '')})"
         except Exception:
