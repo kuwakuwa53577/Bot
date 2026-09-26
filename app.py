@@ -21,7 +21,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
 MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
 ANNOUNCE_CHANNEL_ID = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))  # 朝の通知送信先チャンネルID
-CREATE_VC_ID = int(os.getenv("CREATE_VC_ID", "0"))              # ワンタイム部屋作成用VCのID
+CREATE_VC_ID = int(os.getenv("CREATE_VC_ID", "0"))               # ワンタイム部屋作成用VCのID
 WEB_URL = os.getenv("WEB_URL")
 PORT = int(os.getenv("PORT", 5000))
 
@@ -238,11 +238,18 @@ async def morning_announcement():
         embed.add_field(name="📰 最新ニュース", value=f"取得エラー: {e}", inline=False)
 
     # 3. 47都道府県の天気 (気象庁概要JSONデータ)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        res = requests.get("https://www.jma.go.jp/bosai/forecast/data/overview_forecast/130000.json", timeout=5).json()
-        tokyo_weather = res.get("text", "情報なし").replace("\n\n", "\n")[:200] + "..."
-        embed.add_field(name="🌤️ 今日の天気 (東京・関東例)", value=tokyo_weather, inline=False)
-        embed.set_footer(text="※他の地域の詳細情報は気象庁公式ページをご確認ください。")
+        res = requests.get("https://www.jma.go.jp/bosai/forecast/data/overview_forecast/130000.json", headers=headers, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            tokyo_weather = data.get("text", "情報なし").replace("\n\n", "\n")[:200] + "..."
+            embed.add_field(name="🌤️ 今日の天気 (東京・関東例)", value=tokyo_weather, inline=False)
+            embed.set_footer(text="※他の地域の詳細情報は気象庁公式ページをご確認ください。")
+        else:
+            embed.add_field(name="🌤️ 天気情報", value="現在天気データを取得できません。", inline=False)
     except Exception:
         embed.add_field(name="🌤️ 天気情報", value="天気データの取得に失敗しました。", inline=False)
 
