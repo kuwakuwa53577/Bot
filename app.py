@@ -252,60 +252,49 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # スラッシュコマンド群
 # --------------------------------------------------
 
-# --------------------------------------------------
-# 目覚まし・イタズラ通知コマンド (/wake_up)
-# --------------------------------------------------
-@discord_bot.tree.command(name="wake_up", description="everyoneに目覚まし通知を送信します")
+@discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
 async def wake_up_command(interaction: discord.Interaction):
     # 実行権限チェック（実行者自身のIDまたは管理者ロールのみ許可）
     if interaction.user.id != ADMIN_USER_ID:
-        # 管理者ID以外の実行を制限したい場合
         user_role_ids = [r.id for r in interaction.user.roles]
         if ADMIN_ROLE_ID not in user_role_ids:
             await interaction.response.send_message("❌ このコマンドを実行する権限がありません。", ephemeral=True)
             return
 
-    await interaction.response.send_message("⏰ everyoneへの目覚まし通知を開始します！", ephemeral=True)
+    await interaction.response.send_message("⏰ おぜうモードでeveryoneへの通知を開始します…！", ephemeral=True)
 
-    # 送信するメッセージや画像の準備
+    # 1つのメッセージに大量のメンションを詰め込む（おぜうBot風の絨毯爆撃スタイル）
+    # ※文字列の長さに応じて、1回の送信に含まれる@everyoneの数を調整してください
+    spam_mentions = " ".join(["@everyone"] * 40)
+
     wake_messages = [
-        "@everyone ☀️",
-        "@everyone ！！ ⏰⚡",
-        "やあ 👁️👄👁️",
-        "@everyone 🔥",
-        "@everyone 🎉"
+        f"{spam_mentions}\n<@everyoneうおｗ",
+        f"{spam_mentions}\n<@everyone",
+        f"{spam_mentions}\n<@everyone",
+        f"{spam_mentions}\n<@everyone",
+        f"{spam_mentions}\n<@everyone>"
     ]
 
-    # 画像URL（送信された4色画像の直リンクなどを指定可能）
-    image_url = "https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f305.png"  # 例: 朝日の画像など
+    image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
 
     for i in range(5):
         try:
             embed = discord.Embed(
                 title=f"🚨 うおｗうおｗうおｗ ({i+1}/5)",
-                description=f"@everyone\n{wake_messages[i]}",
+                description=wake_messages[i],
                 color=discord.Color.red()
             )
             embed.set_thumbnail(url=image_url)
             
-            # DMまたは実行チャンネルへ送信
-            await interaction.channel.send(content="@everyone", embed=embed)
+            # 本文（content）側にもeveryoneを仕込むことで、より確実に通知を飛ばします
+            await interaction.channel.send(content="@everyone 🚨🚨🚨", embed=embed)
             
-            await asyncio.sleep(0)
+            # レートリミット（5秒制限）に引っかからない絶妙な間隔（1.5秒〜2秒）
+            await asyncio.sleep(1.5)
         except Exception as e:
             print(f"目覚まし送信エラー: {e}")
             break
 
-
-    # 仕上げの簡易投票パネルを送信
-    poll_embed = discord.Embed(
-        title="📊 【起床確認アンケート】",
-        description=f"{target_user.mention} さん、起きましたか？\n1️⃣ うおｗ！\n2️⃣ いいね～…",
-        color=discord.Color.green()
-    )
-    poll_msg = await interaction.channel.send(embed=poll_embed)
-    await poll_msg.add_reaction("1️⃣")
-    await poll_msg.add_reaction("2️⃣")
 
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 async def rule_command(interaction: discord.Interaction):
