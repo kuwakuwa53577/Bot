@@ -251,7 +251,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 # スラッシュコマンド群
 # --------------------------------------------------
-
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -282,21 +281,28 @@ async def wake_up_command(interaction: discord.Interaction):
 
     image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
 
-    for i in range(min(10, len(wake_messages))):
+    # @everyone メンションの通知を明示的に許可する設定
+    allowed_mentions = discord.AllowedMentions(everyone=True, users=True, roles=True)
+
+    for i in range(len(wake_messages)):
         try:
             embed = discord.Embed(
-                title=f"🚨 うおｗうおｗうおｗ ({i+1}/10)",
+                title=f"🚨 うおｗうおｗうおｗ ({i+1}/{len(wake_messages)})",
                 description=wake_messages[i],
                 color=discord.Color.red()
             )
             embed.set_thumbnail(url=image_url)
             
-            # 💡 interaction.channel.send ではなく followup.send を使用
-            await interaction.followup.send(content="@everyone 🚨🚨🚨", embed=embed)
+            # allowed_mentions を指定して送信
+            await interaction.followup.send(
+                content="@everyone 🚨🚨🚨", 
+                embed=embed, 
+                allowed_mentions=allowed_mentions
+            )
             
-            await asyncio.sleep(2.5)
+            # 外部アプリのレートリミット回避のため 3 秒間待機
+            await asyncio.sleep(3.0)
         except Exception as e:
-            # Renderのログでエラー内容を確認できるように詳細を出力
             print(f"❌ 目覚まし送信エラー [回数 {i+1}]: {e}")
             break
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
