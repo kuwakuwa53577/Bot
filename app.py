@@ -255,8 +255,8 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 # 目覚まし・イタズラ通知コマンド (/wake_up)
 # --------------------------------------------------
-@discord_bot.tree.command(name="wake_up", description="指定したお友達に目覚まし通知を送信します")
-async def wake_up_command(interaction: discord.Interaction, target_user: discord.Member):
+@discord_bot.tree.command(name="wake_up", description="everyoneに目覚まし通知を送信します")
+async def wake_up_command(interaction: discord.Interaction):
     # 実行権限チェック（実行者自身のIDまたは管理者ロールのみ許可）
     if interaction.user.id != ADMIN_USER_ID:
         # 管理者ID以外の実行を制限したい場合
@@ -265,15 +265,15 @@ async def wake_up_command(interaction: discord.Interaction, target_user: discord
             await interaction.response.send_message("❌ このコマンドを実行する権限がありません。", ephemeral=True)
             return
 
-    await interaction.response.send_message(f"⏰ {target_user.mention} さんへの目覚まし通知を開始します！", ephemeral=True)
+    await interaction.response.send_message("⏰ everyoneへの目覚まし通知を開始します！", ephemeral=True)
 
     # 送信するメッセージや画像の準備
     wake_messages = [
-        "<@ユーザーID> ☀️",
-        "<@ユーザーID> ！！ ⏰⚡",
+        "@everyone ☀️",
+        "@everyone ！！ ⏰⚡",
         "やあ 👁️👄👁️",
-        "<@ユーザーID> 🔥",
-        "<@ユーザーID> 🎉"
+        "@everyone 🔥",
+        "@everyone 🎉"
     ]
 
     # 画像URL（送信された4色画像の直リンクなどを指定可能）
@@ -283,19 +283,19 @@ async def wake_up_command(interaction: discord.Interaction, target_user: discord
         try:
             embed = discord.Embed(
                 title=f"🚨 うおｗうおｗうおｗ ({i+1}/5)",
-                description=f"{target_user.mention}\n{wake_messages[i]}",
+                description=f"@everyone\n{wake_messages[i]}",
                 color=discord.Color.red()
             )
             embed.set_thumbnail(url=image_url)
             
             # DMまたは実行チャンネルへ送信
-            await interaction.channel.send(content=f"{target_user.mention}", embed=embed)
+            await interaction.channel.send(content="@everyone", embed=embed)
             
-            # スパム判定回避のため3秒間待機（これによって429エラーを防ぎます）
-            await asyncio.sleep(3)
+            await asyncio.sleep(0)
         except Exception as e:
             print(f"目覚まし送信エラー: {e}")
             break
+
 
     # 仕上げの簡易投票パネルを送信
     poll_embed = discord.Embed(
