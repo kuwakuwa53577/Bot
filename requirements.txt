@@ -1,4 +1,5 @@
 discord.py
-flask
+Flask
 firebase-admin
-pip install feedparser requests discord-ext-tasks
+requests
+feedparser
