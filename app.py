@@ -251,6 +251,8 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 # スラッシュコマンド群
 # --------------------------------------------------
+import discord
+from discord import app_commands
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
 async def wake_up_command(interaction: discord.Interaction):
     # 実行権限チェック（実行者自身のIDまたは管理者ロールのみ許可）
