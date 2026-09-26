@@ -287,6 +287,9 @@ async def wake_up_command(interaction: discord.Interaction, count: int = 10):
     image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
     allowed_mentions = discord.AllowedMentions(everyone=True, users=True, roles=True)
 
+    # Botがサーバー内に存在するか確認
+    is_in_guild = interaction.guild and interaction.guild.get_member(discord_bot.user.id) is not None
+
     for i in range(count):
         try:
             embed = discord.Embed(
@@ -296,21 +299,22 @@ async def wake_up_command(interaction: discord.Interaction, count: int = 10):
             )
             embed.set_thumbnail(url=image_url)
             
-            # 1回目は followup、2回目以降は channel.send または followup を柔軟に使用
-            if interaction.channel:
+            # Botがサーバーにいる場合は channel.send、外部アプリの場合は followup.send を使用
+            if is_in_guild and interaction.channel:
                 await interaction.channel.send(
                     content="@everyone 🚨🚨🚨", 
                     embed=embed,
                     allowed_mentions=allowed_mentions
                 )
+                await asyncio.sleep(2.0)
             else:
                 await interaction.followup.send(
                     content="@everyone 🚨🚨🚨", 
                     embed=embed,
                     allowed_mentions=allowed_mentions
                 )
-            
-            await asyncio.sleep(2.5)
+                # 外部アプリのレート制限回避のため 3.5秒待機
+                await asyncio.sleep(3.5)
 
         except discord.errors.HTTPException as e:
             if e.status == 429:
@@ -318,7 +322,7 @@ async def wake_up_command(interaction: discord.Interaction, count: int = 10):
                 await asyncio.sleep(5.0)
             else:
                 print(f"❌ HTTPエラー発生 [{e.status}]: {e}")
-                await asyncio.sleep(2.5)
+                await asyncio.sleep(3.0)
         except Exception as e:
             print(f"❌ 目覚まし送信エラー [回数 {i+1}]: {e}")
             break
