@@ -24,7 +24,7 @@ ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # フィードバック受
 MORNING_CHANNEL_ID = int(os.getenv("MORNING_CHANNEL_ID", "0"))  # 朝の通知用チャンネルID
 CREATE_ONETIME_VC_ID = int(os.getenv("CREATE_ONETIME_VC_ID", "0"))  # ワンタイム用トリガーVC ID
 WEB_URL = os.getenv("WEB_URL")
-PORT = int(os.getenv("PORT", 5000))
+PORT = int(os.getenv("PORT", 10000))
 
 # --------------------------------------------------
 # Firebase 初期化
@@ -178,14 +178,10 @@ class MyBot(commands.Bot):
         if not channel:
             return
 
-        # 47都道府県 天気情報取得 (open-meteo API)
-        # 東京・大阪の代表例 Embed (全47都道府県の要約テキストを添付)
         async with aiohttp.ClientSession() as session:
-            # 1. 天気概要
             weather_text = "☀️ **【全国47都道府県 本日の天気予報】**\n"
             weather_text += "・北海道・東北: 晴れのち曇り\n・関東・東海: 快晴 ☀️\n・関西・中国・四国: 時々雨 ☔\n・九州・沖縄: 晴れ 🌤️\n"
             
-            # 2. ニュース取得 (NHK RSSなどの公開フィード)
             news_items = [
                 "1. 最新の国内経済トピックに関する発表がありました。",
                 "2. 本日の全国的な気象傾向について気象庁が警戒を呼びかけています。",
@@ -212,19 +208,18 @@ intents.voice_states = True
 discord_bot = MyBot(command_prefix="!", intents=intents)
 
 # --------------------------------------------------
-# イベントハンドラー (発言でポイント追加 & ワンタイムVC)
+# イベントハンドラー
 # --------------------------------------------------
 @discord_bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
-    # ポイント獲得（30秒クールダウン）
     now = datetime.now().timestamp()
     last_time = discord_bot.user_cooldowns.get(message.author.id, 0)
     if now - last_time > 30:
         discord_bot.user_cooldowns[message.author.id] = now
-        add_user_points(message.author.id, 5)  # 発言で5pt
+        add_user_points(message.author.id, 5)
 
     await discord_bot.process_commands(message)
 
@@ -232,15 +227,11 @@ async def on_message(message: discord.Message):
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     guild = member.guild
 
-    # 1. 特定のトリガーVCに入ったら専用チャット＆VCを作成 (ワンタイムVC)
     if after.channel and after.channel.id == CREATE_ONETIME_VC_ID:
         category = after.channel.category
-        
-        # 専用テキストとボイスを作成
         new_vc = await guild.create_voice_channel(f"🔊-{member.display_name}の部屋", category=category)
         new_txt = await guild.create_text_channel(f"💬-{member.display_name}専用チャット", category=category)
         
-        # 権限設定（入室者権限）
         await new_txt.set_permissions(guild.default_role, read_messages=False)
         await new_txt.set_permissions(member, read_messages=True, send_messages=True)
 
@@ -248,7 +239,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         await member.move_to(new_vc)
         await new_txt.send(f"{member.mention} 専用のテキストチャットを作成しました。全員が退室すると自動削除されます。")
 
-    # 2. ワンタイムVCから全員退室したら削除
     if before.channel and before.channel.id in discord_bot.onetime_channels:
         if len(before.channel.members) == 0:
             txt_id = discord_bot.onetime_channels.pop(before.channel.id, None)
@@ -261,7 +251,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 # スラッシュコマンド群
 # --------------------------------------------------
-# 1. 既存コマンド (/rule, /ban_user, /kuwakuwa)
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(title="サーバー参加ルール", description="下のボタンを押してWebページでルールを承諾してください。", color=0x3498db)
@@ -316,7 +305,6 @@ async def kuwakuwa_command(interaction: discord.Interaction):
         lines.append(f"・{info.get('username','Unknown')} │ IP: {info.get('ip','不明')}")
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-# 2. 新機能コマンド（エコノミー・フィードバック・プライベート部屋）
 @discord_bot.tree.command(name="balance", description="自分の所持ポイントを確認します")
 async def balance_command(interaction: discord.Interaction):
     pts = get_user_points(interaction.user.id)
@@ -355,14 +343,41 @@ async def pvc_command(interaction: discord.Interaction, target_user: discord.Mem
     await interaction.response.send_message("✅ プライベート部屋を作成しました！", ephemeral=True)
 
 # --------------------------------------------------
+# リトライ付きBot起動処理
+# --------------------------------------------------
+async def start_bot_with_retry():
+    retry_delay = 15
+    max_delay = 300
+
+    while True:
+        try:
+            print("🚀 Discord Bot に接続を試みています...")
+            await discord_bot.start(BOT_TOKEN)
+            break
+        except discord.errors.HTTPException as e:
+            if e.status in (429, 502, 504):
+                print(f"⚠️ Discord API レート制限/通信エラー ({e.status})。{retry_delay} 秒後に再試行します...")
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, max_delay)
+            else:
+                print(f"❌ Discord HTTP エラー: {e}")
+                await asyncio.sleep(15)
+        except Exception as e:
+            print(f"❌ 予期せぬエラーが発生しました: {e}")
+            await asyncio.sleep(15)
+
+# --------------------------------------------------
 # メイン実行
 # --------------------------------------------------
 async def main():
+    # Flaskを先にバックグラウンドスレッドで確実に起動
     flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
     flask_thread.daemon = True
     flask_thread.start()
+    print(f"🌐 Flask サーバーをポート {PORT} で起動しました")
 
-    await discord_bot.start(BOT_TOKEN)
+    # Discord Botをリトライ制御付きで起動
+    await start_bot_with_retry()
 
 if __name__ == "__main__":
     asyncio.run(main())
