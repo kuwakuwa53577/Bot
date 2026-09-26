@@ -251,7 +251,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 # スラッシュコマンド群
 # --------------------------------------------------
-
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
 async def wake_up_command(interaction: discord.Interaction):
     # 実行権限チェック（実行者自身のIDまたは管理者ロールのみ許可）
@@ -263,60 +262,59 @@ async def wake_up_command(interaction: discord.Interaction):
 
     await interaction.response.send_message("⏰ おぜうモードでeveryoneへの通知を開始します…！", ephemeral=True)
 
-    # 1つのメッセージに大量のメンションを詰め込む（おぜうBot風の絨毯爆撃スタイル）
-    # ※文字列の長さに応じて、1回の送信に含まれる@everyoneの数を調整してください
     spam_mentions = " ".join(["@everyone"] * 40)
 
+    # 各行の末尾にカンマ（,）を正しく追加しました
     wake_messages = [
         f"{spam_mentions}\n<@everyoneうおｗ",
         f"{spam_mentions}\n<@everyone",
         f"{spam_mentions}\n<@everyone",
         f"{spam_mentions}\n<@everyone",
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
+        f"{spam_mentions}\n<@everyone>",
         f"{spam_mentions}\n<@everyone>"
     ]
 
@@ -331,11 +329,11 @@ async def wake_up_command(interaction: discord.Interaction):
             )
             embed.set_thumbnail(url=image_url)
             
-            # 本文（content）側にもeveryoneを仕込むことで、より確実に通知を飛ばします
             await interaction.channel.send(content="@everyone 🚨🚨🚨", embed=embed)
             
-            # レートリミット（5秒制限）に引っかからない絶妙な間隔（1.5秒〜2秒）
-            await asyncio.sleep(1.5)
+            # 短時間に大量のeveryoneメンションを飛ばすと、Discordのグローバルレートリミットや
+            # スパムフィルター（API制限）を刺激しやすいため、1.5秒から2.5秒以上に延ばすとより安全です
+            await asyncio.sleep(2.5)
         except Exception as e:
             print(f"目覚まし送信エラー: {e}")
             break
