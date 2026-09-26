@@ -253,10 +253,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
+# 👇 ユーザーインストール（外部アプリ）としてアカウントに直接追加することを許可
 @app_commands.allowed_installs(guilds=True, users=True)
+# 👇 実行場所（Botのいないサーバー、DM、グループチャットなど）をすべて許可
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def wake_up_command(interaction: discord.Interaction):
-    # 実行権限チェック（実行者自身のIDまたは管理者ロールのみ許可）
+    # --- 実行権限チェック ---
     if interaction.user.id != ADMIN_USER_ID:
         user_role_ids = [r.id for r in getattr(interaction.user, 'roles', [])]
         if ADMIN_ROLE_ID not in user_role_ids:
