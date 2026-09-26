@@ -251,22 +251,14 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 # スラッシュコマンド群
 # --------------------------------------------------
-import discord
-from discord import app_commands # これが必要
 
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
-# 👇 ユーザーインストール（外部アプリとして追加）を許可する設定を追加
-@app_commands.allowed_installs(guilds=True, users=True) 
-# 👇 コマンドを実行できる場所（サーバー、DM、Botがいない別サーバーのDMなど）をすべて許可
+@app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-async def wake_up_command(interaction: discord.Interaction):
-    # --- 省略（これ以降は元のコードと同じ） ---
-
-@discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
 async def wake_up_command(interaction: discord.Interaction):
     # 実行権限チェック（実行者自身のIDまたは管理者ロールのみ許可）
     if interaction.user.id != ADMIN_USER_ID:
-        user_role_ids = [r.id for r in interaction.user.roles]
+        user_role_ids = [r.id for r in getattr(interaction.user, 'roles', [])]
         if ADMIN_ROLE_ID not in user_role_ids:
             await interaction.response.send_message("❌ このコマンドを実行する権限がありません。", ephemeral=True)
             return
@@ -275,7 +267,6 @@ async def wake_up_command(interaction: discord.Interaction):
 
     spam_mentions = " ".join(["@everyone"] * 40)
 
-    # 各行の末尾にカンマ（,）を正しく追加しました
     wake_messages = [
         f"{spam_mentions}\n<@everyoneうおｗ",
         f"{spam_mentions}\n<@everyone",
@@ -342,13 +333,10 @@ async def wake_up_command(interaction: discord.Interaction):
             
             await interaction.channel.send(content="@everyone 🚨🚨🚨", embed=embed)
             
-            # 短時間に大量のeveryoneメンションを飛ばすと、Discordのグローバルレートリミットや
-            # スパムフィルター（API制限）を刺激しやすいため、1.5秒から2.5秒以上に延ばすとより安全です
             await asyncio.sleep(2.5)
         except Exception as e:
             print(f"目覚まし送信エラー: {e}")
             break
-
 
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 async def rule_command(interaction: discord.Interaction):
