@@ -254,7 +254,10 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-async def wake_up_command(interaction: discord.Interaction):
+@app_commands.describe(
+    count="送信する回数を指定（指定しない場合は10回）"
+)
+async def wake_up_command(interaction: discord.Interaction, count: int = 10):
     # 実行権限チェック
     if interaction.user.id != ADMIN_USER_ID:
         user_role_ids = [r.id for r in getattr(interaction.user, 'roles', [])]
@@ -262,7 +265,10 @@ async def wake_up_command(interaction: discord.Interaction):
             await interaction.response.send_message("❌ このコマンドを実行する権限がありません。", ephemeral=True)
             return
 
-    await interaction.response.send_message("⏰ おぜうモードでeveryoneへの通知を開始します…！", ephemeral=True)
+    # 回数の制限（上限）を撤廃（1回以上であればいくらでも指定可能）
+    count = max(1, count)
+
+    await interaction.response.send_message(f"⏰ おぜうモードでeveryoneへの通知を {count} 回送信開始します…！", ephemeral=True)
 
     spam_mentions = " ".join(["@everyone"] * 40)
 
@@ -280,28 +286,34 @@ async def wake_up_command(interaction: discord.Interaction):
     ]
 
     image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
-
-    # @everyone メンションの通知を明示的に許可する設定
     allowed_mentions = discord.AllowedMentions(everyone=True, users=True, roles=True)
 
-    for i in range(len(wake_messages)):
+    for i in range(count):
         try:
             embed = discord.Embed(
-                title=f"🚨 うおｗうおｗうおｗ ({i+1}/{len(wake_messages)})",
-                description=wake_messages[i],
+                title=f"🚨 うおｗうおｗうおｗ ({i+1}/{count})",
+                description=wake_messages[i % len(wake_messages)],
                 color=discord.Color.red()
             )
             embed.set_thumbnail(url=image_url)
             
-            # allowed_mentions を指定して送信
             await interaction.followup.send(
                 content="@everyone 🚨🚨🚨", 
-                embed=embed, 
+                embed=embed,
                 allowed_mentions=allowed_mentions
             )
             
-            # 外部アプリのレートリミット回避のため 3 秒間待機
-            await asyncio.sleep(3.0)
+            # 回数が多くなってもAPIブロック（429エラー）を受けないように待機時間を確保
+            await asyncio.sleep(3.5)
+
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                # レート制限にかかった場合は少し長めに待機して自動復帰・継続する
+                print(f"⚠️ レート制限検知 (429)。5秒待機後に再行します...")
+                await asyncio.sleep(5.0)
+            else:
+                print(f"❌ HTTPエラー発生 [{e.status}]: {e}")
+                await asyncio.sleep(3.0)
         except Exception as e:
             print(f"❌ 目覚まし送信エラー [回数 {i+1}]: {e}")
             break
