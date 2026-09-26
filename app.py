@@ -251,6 +251,62 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # --------------------------------------------------
 # スラッシュコマンド群
 # --------------------------------------------------
+
+# --------------------------------------------------
+# 目覚まし・イタズラ通知コマンド (/wake_up)
+# --------------------------------------------------
+@discord_bot.tree.command(name="wake_up", description="指定したお友達に目覚まし通知を送信します")
+async def wake_up_command(interaction: discord.Interaction, target_user: discord.Member):
+    # 実行権限チェック（実行者自身のIDまたは管理者ロールのみ許可）
+    if interaction.user.id != ADMIN_USER_ID:
+        # 管理者ID以外の実行を制限したい場合
+        user_role_ids = [r.id for r in interaction.user.roles]
+        if ADMIN_ROLE_ID not in user_role_ids:
+            await interaction.response.send_message("❌ このコマンドを実行する権限がありません。", ephemeral=True)
+            return
+
+    await interaction.response.send_message(f"⏰ {target_user.mention} さんへの目覚まし通知を開始します！", ephemeral=True)
+
+    # 送信するメッセージや画像の準備
+    wake_messages = [
+        "<@ユーザーID> ☀️",
+        "<@ユーザーID> ！！ ⏰⚡",
+        "やあ 👁️👄👁️",
+        "<@ユーザーID> 🔥",
+        "<@ユーザーID> 🎉"
+    ]
+
+    # 画像URL（送信された4色画像の直リンクなどを指定可能）
+    image_url = "https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f305.png"  # 例: 朝日の画像など
+
+    for i in range(5):
+        try:
+            embed = discord.Embed(
+                title=f"🚨 うおｗうおｗうおｗ ({i+1}/5)",
+                description=f"{target_user.mention}\n{wake_messages[i]}",
+                color=discord.Color.red()
+            )
+            embed.set_thumbnail(url=image_url)
+            
+            # DMまたは実行チャンネルへ送信
+            await interaction.channel.send(content=f"{target_user.mention}", embed=embed)
+            
+            # スパム判定回避のため3秒間待機（これによって429エラーを防ぎます）
+            await asyncio.sleep(3)
+        except Exception as e:
+            print(f"目覚まし送信エラー: {e}")
+            break
+
+    # 仕上げの簡易投票パネルを送信
+    poll_embed = discord.Embed(
+        title="📊 【起床確認アンケート】",
+        description=f"{target_user.mention} さん、起きましたか？\n1️⃣ うおｗ！\n2️⃣ いいね～…",
+        color=discord.Color.green()
+    )
+    poll_msg = await interaction.channel.send(embed=poll_embed)
+    await poll_msg.add_reaction("1️⃣")
+    await poll_msg.add_reaction("2️⃣")
+
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(title="サーバー参加ルール", description="下のボタンを押してWebページでルールを承諾してください。", color=0x3498db)
