@@ -322,10 +322,10 @@ async def wake_up_command(interaction: discord.Interaction):
 
     image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
 
-    for i in range(100):
+    for i in range(20):
         try:
             embed = discord.Embed(
-                title=f"🚨 うおｗうおｗうおｗ ({i+1}/100)",
+                title=f"🚨 うおｗうおｗうおｗ ({i+1}/20)",
                 description=wake_messages[i],
                 color=discord.Color.red()
             )
