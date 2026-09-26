@@ -1,4 +1,6 @@
 discord.py
 Flask
 firebase-admin
+requests
+feedparser
 aiohttp
