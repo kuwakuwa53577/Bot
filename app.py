@@ -268,91 +268,128 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # 目覚まし送信処理（非同期バックグラウンドタスク）
 # --------------------------------------------------
 async def send_wake_messages(interaction: discord.Interaction, count: int):
-    spam_mentions = " ".join(["@everyone"] * 40)
-    wake_messages = [
-        f"{spam_mentions}\n<@everyoneうおｗ",
-        f"{spam_mentions}\n<@everyone",
-        f"{spam_mentions}\n<@everyone",
-        f"{spam_mentions}\n<@everyone",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>",
-        f"{spam_mentions}\n<@everyone>"
-    ]
+    """User Install / Guild Install の両方から使える通知送信処理。
+
+    Interaction の followup を使うことで、User Install でも
+    「Botユーザーがサーバーに参加しているか」に依存しません。
+    Discord API のレート制限には従います。
+    """
+    MAX_WAKE_COUNT = 10
+    count = min(max(int(count), 1), MAX_WAKE_COUNT)
+
     image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
-    allowed_mentions = discord.AllowedMentions(everyone=True, users=True, roles=True)
+    allowed_mentions = discord.AllowedMentions(
+        everyone=True,
+        users=False,
+        roles=False
+    )
 
     for i in range(count):
         try:
             embed = discord.Embed(
-                title=f"🚨 うおｗうおｗうおｗ ({i+1}/{count})",
-                description=wake_messages[i % len(wake_messages)],
+                title=f"🚨 うおｗうおｗうおｗ ({i + 1}/{count})",
+                description="🚨 目覚まし通知です！",
                 color=discord.Color.red()
             )
             embed.set_thumbnail(url=image_url)
 
-            # チャンネルへ直接送信
-            if interaction.channel:
-                await interaction.channel.send(
-                    content="@everyone 🚨🚨🚨",
-                    embed=embed,
-                    allowed_mentions=allowed_mentions
-                )
+            # User Installでも利用できるInteraction Followupを使用
+            await interaction.followup.send(
+                content="@everyone 🚨🚨🚨",
+                embed=embed,
+                allowed_mentions=allowed_mentions
+            )
+
+            # Discord APIのレート制限を避けるための間隔
+            if i + 1 < count:
                 await asyncio.sleep(2.0)
-            else:
-                break
 
         except discord.errors.HTTPException as e:
             print(f"⚠️ HTTPエラー発生 [{e.status}]: {e}")
+
             if e.status == 429:
-                print("⚠️ レート制限検知 (429)。5秒待機後に継続します...")
+                retry_after = getattr(e, "retry_after", None)
+                if retry_after is None:
+                    retry_after = 5.0
+                print(f"⚠️ レート制限。{retry_after}秒待機します。")
+                await asyncio.sleep(float(retry_after))
+                continue
+
+            if e.status in (500, 502, 503, 504):
                 await asyncio.sleep(5.0)
-            else:
-                await asyncio.sleep(3.0)
-        except Exception as e:
-            print(f"❌ 目覚まし送信エラー [回数 {i+1}]: {e}")
+                continue
+
             break
+
+        except discord.Forbidden as e:
+            print(f"❌ Discord権限エラー: {e}")
+            break
+
+        except Exception as e:
+            print(f"❌ 目覚まし送信エラー [回数 {i + 1}]: {e}")
+            break
+
 
 # --------------------------------------------------
 # スラッシュコマンド
 # --------------------------------------------------
-@discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
-# サーバー操作を行うため、Guild Install 専用
-@app_commands.allowed_installs(guilds=True, users=False)
-@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-@app_commands.describe(
-    count="送信する回数を指定（指定しない場合は10回）"
+@discord_bot.tree.command(
+    name="wake_up",
+    description="目覚まし通知を送信します"
 )
-async def wake_up_command(interaction: discord.Interaction, count: int = 10):
+# User Install と Guild Install の両方で利用可能
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(
+    guilds=True,
+    dms=True,
+    private_channels=True
+)
+@app_commands.describe(
+    count="送信回数（1～10）"
+)
+async def wake_up_command(
+    interaction: discord.Interaction,
+    count: int = 1
+):
     # 実行権限チェック
     if interaction.user.id != ADMIN_USER_ID:
-        user_role_ids = [r.id for r in getattr(interaction.user, 'roles', [])]
-        if ADMIN_ROLE_ID not in user_role_ids:
-            await interaction.response.send_message("❌ このコマンドを実行する権限がありません。", ephemeral=True)
+        user_role_ids = [
+            r.id for r in getattr(interaction.user, "roles", [])
+        ]
+
+        if ADMIN_ROLE_ID == 0 or ADMIN_ROLE_ID not in user_role_ids:
+            await interaction.response.send_message(
+                "❌ このコマンドを実行する権限がありません。",
+                ephemeral=True
+            )
             return
 
-    # Botがサーバーに参加しているかチェック
-    is_in_guild = (
-        interaction.guild is not None 
-        and interaction.guild.get_member(discord_bot.user.id) is not None
-    )
-
-    if not is_in_guild:
+    # 入力値チェック
+    if count < 1:
         await interaction.response.send_message(
-            "❌ このコマンドを実行するには、Botをこのサーバーに招待（追加）する必要があります。", 
+            "❌ 回数は1以上を指定してください。",
             ephemeral=True
         )
         return
 
-    count = max(1, count)
+    if count > 10:
+        await interaction.response.send_message(
+            "❌ このコマンドは1回の実行につき最大10回です。",
+            ephemeral=True
+        )
+        return
 
-    # 応答を即座に返し、タイムアウトを回避
-    await interaction.response.send_message(f"⏰ おぜうモードでeveryoneへの通知を {count} 回送信開始します…！", ephemeral=True)
+    # Interactionを先に確実にACKする
+    await interaction.response.send_message(
+        f"⏰ 目覚まし通知を {count} 回送信開始します。",
+        ephemeral=True
+    )
 
-    # 非同期タスクとしてバックグラウンドで連続送信を実行
-    asyncio.create_task(send_wake_messages(interaction, count))
+    # バックグラウンドで送信
+    asyncio.create_task(
+        send_wake_messages(interaction, count)
+    )
+
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 # Web認証パネルをサーバー内に設置するコマンド
 @app_commands.allowed_installs(guilds=True, users=False)
