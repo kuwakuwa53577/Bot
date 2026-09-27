@@ -209,10 +209,20 @@ class MyBot(commands.Bot):
     async def before_morning_task(self):
         await self.wait_until_ready()
 
+# --------------------------------------------------
+# Bot 初期化（プロキシ対応）
+# --------------------------------------------------
+PROXY_URL = os.getenv("PROXY_URL")
+
 intents = discord.Intents.default()
 intents.voice_states = True
 
-discord_bot = MyBot(command_prefix="!", intents=intents)
+# proxy パラメータを設定（PROXY_URL が設定されていればプロキシ経由、なければ通常接続）
+discord_bot = MyBot(
+    command_prefix="!",
+    intents=intents,
+    proxy=PROXY_URL
+)
 
 @discord_bot.event
 async def on_ready():
