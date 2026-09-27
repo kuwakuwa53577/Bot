@@ -212,11 +212,34 @@ class MyBot(commands.Bot):
         await self.wait_until_ready()
 
 intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
+# Privileged Intent を使わず、Gateway接続を安定させる
+# （スラッシュコマンド中心なので members / message_content は不要）
 intents.voice_states = True
 
 discord_bot = MyBot(command_prefix="!", intents=intents)
+
+@discord_bot.event
+async def on_ready():
+    print("========================================")
+    print("✅ Discord Bot 接続成功")
+    print(f"🤖 Bot: {discord_bot.user}")
+    print(f"🆔 ID: {discord_bot.user.id if discord_bot.user else 'unknown'}")
+    print(f"🏠 Guild数: {len(discord_bot.guilds)}")
+    print("========================================")
+
+@discord_bot.event
+async def on_disconnect():
+    print("⚠️ Discord Gateway から切断されました")
+
+@discord_bot.event
+async def on_resumed():
+    print("🔄 Discord Gateway に再接続しました")
+
+@discord_bot.event
+async def on_error(event, *args, **kwargs):
+    import traceback
+    print(f"❌ Discordイベントエラー: {event}")
+    traceback.print_exc()
 
 # --------------------------------------------------
 # イベントハンドラー
@@ -232,7 +255,7 @@ async def on_message(message: discord.Message):
         discord_bot.user_cooldowns[message.author.id] = now
         add_user_points(message.author.id, 5)
 
-    await discord_bot.process_commands(message)
+    # プレフィックスコマンドは使用していないため process_commands は不要。
 
 @discord_bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
@@ -520,6 +543,9 @@ async def pvc_command(interaction: discord.Interaction, target_user: discord.Mem
 # リトライ付きBot起動処理
 # --------------------------------------------------
 async def start_bot_with_retry():
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN が Render の Environment Variables に設定されていません。")
+
     retry_delay = 15
     max_delay = 300
 
