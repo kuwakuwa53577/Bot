@@ -248,6 +248,11 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     await txt_chan.delete()
             await before.channel.delete()
 
+
+
+# --------------------------------------------------
+# スラッシュコマンド群
+# --------------------------------------------------
 # --------------------------------------------------
 # 目覚まし送信処理（非同期バックグラウンドタスク）
 # --------------------------------------------------
@@ -268,12 +273,6 @@ async def send_wake_messages(interaction: discord.Interaction, count: int):
     image_url = "https://logo-imagecluster.img.mixi.jp/photo/comm/99/35/1429935_233.gif"
     allowed_mentions = discord.AllowedMentions(everyone=True, users=True, roles=True)
 
-    # Botが対象サーバーのメンバーとして存在しているか判定
-    is_in_guild = (
-        interaction.guild is not None 
-        and interaction.guild.get_member(discord_bot.user.id) is not None
-    )
-
     for i in range(count):
         try:
             embed = discord.Embed(
@@ -283,8 +282,8 @@ async def send_wake_messages(interaction: discord.Interaction, count: int):
             )
             embed.set_thumbnail(url=image_url)
 
-            # サーバー内にBotがいる場合は通常のチャンネル送信、外部アプリの場合は followup 送信
-            if is_in_guild and interaction.channel:
+            # チャンネルへ直接送信
+            if interaction.channel:
                 await interaction.channel.send(
                     content="@everyone 🚨🚨🚨",
                     embed=embed,
@@ -292,20 +291,11 @@ async def send_wake_messages(interaction: discord.Interaction, count: int):
                 )
                 await asyncio.sleep(2.0)
             else:
-                await interaction.followup.send(
-                    content="@everyone 🚨🚨🚨",
-                    embed=embed,
-                    allowed_mentions=allowed_mentions
-                )
-                # 外部アプリのレート制限（5回ストップ）回避のため 4.0 秒間隔
-                await asyncio.sleep(4.0)
+                break
 
         except discord.errors.HTTPException as e:
             print(f"⚠️ HTTPエラー発生 [{e.status}]: {e}")
-            if e.status == 404:
-                print("❌ インタラクションの有効期限が切れました。送信を終了します。")
-                break
-            elif e.status == 429:
+            if e.status == 429:
                 print("⚠️ レート制限検知 (429)。5秒待機後に継続します...")
                 await asyncio.sleep(5.0)
             else:
@@ -315,7 +305,7 @@ async def send_wake_messages(interaction: discord.Interaction, count: int):
             break
 
 # --------------------------------------------------
-# スラッシュコマンド群
+# スラッシュコマンド
 # --------------------------------------------------
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -331,6 +321,19 @@ async def wake_up_command(interaction: discord.Interaction, count: int = 10):
             await interaction.response.send_message("❌ このコマンドを実行する権限がありません。", ephemeral=True)
             return
 
+    # Botがサーバーに参加しているかチェック
+    is_in_guild = (
+        interaction.guild is not None 
+        and interaction.guild.get_member(discord_bot.user.id) is not None
+    )
+
+    if not is_in_guild:
+        await interaction.response.send_message(
+            "❌ このコマンドを実行するには、Botをこのサーバーに招待（追加）する必要があります。", 
+            ephemeral=True
+        )
+        return
+
     count = max(1, count)
 
     # 応答を即座に返し、タイムアウトを回避
@@ -338,7 +341,6 @@ async def wake_up_command(interaction: discord.Interaction, count: int = 10):
 
     # 非同期タスクとしてバックグラウンドで連続送信を実行
     asyncio.create_task(send_wake_messages(interaction, count))
-
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(title="サーバー参加ルール", description="下のボタンを押してWebページでルールを承諾してください。", color=0x3498db)
