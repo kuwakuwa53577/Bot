@@ -14,6 +14,13 @@ from flask import Flask, render_template_string, request, jsonify
 import firebase_admin
 from firebase_admin import credentials, firestore
 
+import logging
+
+# discord モジュールのログ出力を有効化
+logging.basicConfig(level=logging.INFO)
+discord_logger = logging.getLogger("discord")
+discord_logger.setLevel(logging.DEBUG)  # より詳細なWebSocket通信ログを見る場合はDEBUG
+
 # --------------------------------------------------
 # 設定 & 環境変数
 # --------------------------------------------------
