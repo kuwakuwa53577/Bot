@@ -93,18 +93,18 @@ async def start_bot_with_retry():
 # 6. アプリケーションのエントリーポイント
 # ==================================================
 async def main():
-  # Flask サーバーをバックグラウンドで開始
-  import uvicorn
-
-  # Flask/Werkzeug の開発サーバー起動（または非同期タスクとして実行）
+  # Flask サーバーを別スレッド（バックグラウンド）で起動
   loop = asyncio.get_running_loop()
   loop.create_task(
       asyncio.to_thread(
-          app.run, host="0.0.0.0", port=int(os.getenv("PORT", 10000))
+          app.run,
+          host="0.0.0.0",
+          port=int(os.getenv("PORT", 10000)),
+          use_reloader=False,  # 二重起動を防止
       )
   )
 
-  # Discord Bot の起動
+  # Discord Bot の起動（リトライ処理付き）
   await start_bot_with_retry()
 
 
