@@ -268,10 +268,11 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # 目覚まし送信処理（非同期バックグラウンドタスク）
 # --------------------------------------------------
 async def send_wake_messages(interaction: discord.Interaction, count: int):
-    """User Install / Guild Install の両方から使える通知送信処理。
+    """
+    /wake_up の実送信処理。
 
-    Interaction の followup を使うことで、User Install でも
-    「Botユーザーがサーバーに参加しているか」に依存しません。
+    User Install の場合でも、コマンドへの応答は Interaction Webhook 経由で
+    行えるため、通常の bot メンバー取得を前提にしません。
     Discord API のレート制限には従います。
     """
     MAX_WAKE_COUNT = 10
@@ -293,25 +294,26 @@ async def send_wake_messages(interaction: discord.Interaction, count: int):
             )
             embed.set_thumbnail(url=image_url)
 
-            # User Installでも利用できるInteraction Followupを使用
+            # Interaction の Followup は、このコマンドを実行した場所へ
+            # Interaction の応答として送信します。
             await interaction.followup.send(
                 content="@everyone 🚨🚨🚨",
                 embed=embed,
-                allowed_mentions=allowed_mentions
+                allowed_mentions=allowed_mentions,
+                wait=True
             )
 
-            # Discord APIのレート制限を避けるための間隔
             if i + 1 < count:
                 await asyncio.sleep(2.0)
 
         except discord.errors.HTTPException as e:
-            print(f"⚠️ HTTPエラー発生 [{e.status}]: {e}")
+            print(f"⚠️ wake_up HTTPエラー [{e.status}]: {e}")
 
             if e.status == 429:
                 retry_after = getattr(e, "retry_after", None)
                 if retry_after is None:
                     retry_after = 5.0
-                print(f"⚠️ レート制限。{retry_after}秒待機します。")
+                print(f"⚠️ Discordレート制限。{retry_after}秒待機します。")
                 await asyncio.sleep(float(retry_after))
                 continue
 
@@ -322,12 +324,20 @@ async def send_wake_messages(interaction: discord.Interaction, count: int):
             break
 
         except discord.Forbidden as e:
-            print(f"❌ Discord権限エラー: {e}")
+            print(f"❌ wake_up 権限エラー: {e}")
             break
 
         except Exception as e:
-            print(f"❌ 目覚まし送信エラー [回数 {i + 1}]: {e}")
+            print(f"❌ wake_up 送信エラー [{i + 1}/{count}]: {e}")
             break
+
+
+async def run_wake_messages(interaction: discord.Interaction, count: int):
+    """バックグラウンド実行時の例外を確実にログへ出すラッパー。"""
+    try:
+        await send_wake_messages(interaction, count)
+    except Exception as e:
+        print(f"❌ wake_up バックグラウンドタスク失敗: {e}")
 
 
 # --------------------------------------------------
@@ -337,7 +347,6 @@ async def send_wake_messages(interaction: discord.Interaction, count: int):
     name="wake_up",
     description="目覚まし通知を送信します"
 )
-# User Install と Guild Install の両方で利用可能
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(
     guilds=True,
@@ -352,6 +361,8 @@ async def wake_up_command(
     count: int = 1
 ):
     # 実行権限チェック
+    # User Install では interaction.user.roles が利用できないため、
+    # 外部アプリから実行する場合は ADMIN_USER_ID を使用します。
     if interaction.user.id != ADMIN_USER_ID:
         user_role_ids = [
             r.id for r in getattr(interaction.user, "roles", [])
@@ -364,7 +375,6 @@ async def wake_up_command(
             )
             return
 
-    # 入力値チェック
     if count < 1:
         await interaction.response.send_message(
             "❌ 回数は1以上を指定してください。",
@@ -379,15 +389,19 @@ async def wake_up_command(
         )
         return
 
-    # Interactionを先に確実にACKする
+    # ここが今回の修正点。
+    # 以前は ephemeral=True だったため、開始メッセージが
+    # 「これはあなただけに表示されています」になっていました。
+    # User Install のサーバー実行では、実行ユーザーに送信権限がある場合、
+    # 通常の Interaction 応答として公開できます。
     await interaction.response.send_message(
-        f"⏰ 目覚まし通知を {count} 回送信開始します。",
-        ephemeral=True
+        f"⏰ おぜうモードでeveryoneへの通知を {count} 回送信開始します…！",
+        ephemeral=False
     )
 
-    # バックグラウンドで送信
+    # Interaction の公開応答後に Followup を使って続きのメッセージを送ります。
     asyncio.create_task(
-        send_wake_messages(interaction, count)
+        run_wake_messages(interaction, count)
     )
 
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
