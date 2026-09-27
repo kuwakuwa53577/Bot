@@ -8,6 +8,13 @@ from threading import Thread
 import aiohttp
 import discord
 from discord import app_commands
+
+# User Install / allowed_installs / allowed_contexts は discord.py 2.4+ が必要
+if tuple(map(int, discord.__version__.split(".")[:2])) < (2, 4):
+    raise RuntimeError(
+        f"discord.py 2.4以上が必要です。現在: {discord.__version__}\n"
+        "pip install -U discord.py を実行してください。"
+    )
 from discord.ext import commands, tasks
 from flask import Flask, render_template_string, request, jsonify
 
@@ -166,9 +173,13 @@ class MyBot(commands.Bot):
         self.onetime_channels = {}  # {vc_id: text_channel_id}
 
     async def setup_hook(self):
-        await self.tree.sync()
+        # Global commandとして同期。User Install対応コマンドのintegration_typesも
+        # discord.py 2.4+ がDiscordへ送信するため、ここで特別な分岐は不要です。
+        synced = await self.tree.sync()
         self.morning_task.start()
-        print("✅ スラッシュコマンド同期完了 & 定期タスク起動")
+        print(f"✅ スラッシュコマンド同期完了: {len(synced)} 件")
+        print("   - User Install対応: /balance /daily /feedback")
+        print("   - Guild Install専用: /wake_up /rule /ban_user /kuwakuwa /pvc")
 
     @tasks.loop(hours=24)
     async def morning_task(self):
@@ -308,8 +319,9 @@ async def send_wake_messages(interaction: discord.Interaction, count: int):
 # スラッシュコマンド
 # --------------------------------------------------
 @discord_bot.tree.command(name="wake_up", description="おぜう仕様でeveryoneに超強力な目覚まし通知を送信します")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+# サーバー操作を行うため、Guild Install 専用
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 @app_commands.describe(
     count="送信する回数を指定（指定しない場合は10回）"
 )
@@ -342,6 +354,9 @@ async def wake_up_command(interaction: discord.Interaction, count: int = 10):
     # 非同期タスクとしてバックグラウンドで連続送信を実行
     asyncio.create_task(send_wake_messages(interaction, count))
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
+# Web認証パネルをサーバー内に設置するコマンド
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(title="サーバー参加ルール", description="下のボタンを押してWebページでルールを承諾してください。", color=0x3498db)
     view = discord.ui.View()
@@ -354,7 +369,10 @@ async def rule_command(interaction: discord.Interaction):
     view.add_item(btn)
     await interaction.response.send_message(embed=embed, view=view)
 
-@discord_bot.tree.command(name="ban_user", description="ユーザーをBANし、IPと位置情報を出力")
+@discord_bot.tree.command(name="ban_user", description="ユーザーをBANし、記録された認証情報を確認してBANします")
+# BANはサーバー権限が必要なので Guild Install 専用
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 @app_commands.checks.has_permissions(ban_members=True)
 async def ban_user_command(interaction: discord.Interaction, member: discord.Member, reason: str = "規約違反"):
     await interaction.response.defer()
@@ -384,6 +402,9 @@ async def ban_user_command(interaction: discord.Interaction, member: discord.Mem
         await interaction.followup.send(f"❌ BAN失敗: {e}")
 
 @discord_bot.tree.command(name="kuwakuwa", description="認証メンバー一覧を取得")
+# Firestoreのサーバー管理情報を扱うため Guild Install 専用
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 @app_commands.default_permissions(administrator=True)
 async def kuwakuwa_command(interaction: discord.Interaction):
     data = load_all_data()
@@ -396,16 +417,25 @@ async def kuwakuwa_command(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 @discord_bot.tree.command(name="balance", description="自分の所持ポイントを確認します")
+# User Install / Guild Install の両方で利用可能
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def balance_command(interaction: discord.Interaction):
     pts = get_user_points(interaction.user.id)
     await interaction.response.send_message(f"💰 {interaction.user.mention} さんの所持ポイント: **{pts} PT**", ephemeral=True)
 
 @discord_bot.tree.command(name="daily", description="デイリーログインボーナス（100PT）を獲得します")
+# User Install / Guild Install の両方で利用可能
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def daily_command(interaction: discord.Interaction):
     pts = add_user_points(interaction.user.id, 100)
     await interaction.response.send_message(f"🎁 デイリーボーナス100PTを受け取りました！ (現在: {pts} PT)", ephemeral=True)
 
-@discord_bot.tree.command(name="feedback", description="管理者へご意見・ご要望を匿名送信します")
+@discord_bot.tree.command(name="feedback", description="管理者へご意見・ご要望を送信します")
+# User Install / Guild Install の両方で利用可能
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def feedback_command(interaction: discord.Interaction, message: str):
     if ADMIN_USER_ID == 0:
         await interaction.response.send_message("❌ 管理者IDが設定されていません。", ephemeral=True)
@@ -418,6 +448,9 @@ async def feedback_command(interaction: discord.Interaction, message: str):
         await interaction.response.send_message("✅ 管理者へメッセージを送信しました！", ephemeral=True)
 
 @discord_bot.tree.command(name="pvc", description="特定の人だけが入れるプライベート部屋を作成します")
+# カテゴリ・VC・テキストチャンネルを作成するため Guild Install 専用
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 async def pvc_command(interaction: discord.Interaction, target_user: discord.Member):
     guild = interaction.guild
     overwrites = {
