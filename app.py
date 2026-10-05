@@ -1,16 +1,12 @@
 import asyncio
 import json
 import os
-import random
 import datetime
-import urllib.parse
-import xml.etree.ElementTree as ET
 from threading import Thread
 
-import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 from flask import Flask, render_template_string, request, jsonify
 
 import firebase_admin
@@ -18,24 +14,17 @@ from firebase_admin import credentials, firestore
 
 import logging
 
-# discord モジュールのログ出力を有効化
+# ログ設定
 logging.basicConfig(level=logging.INFO)
-discord_logger = logging.getLogger("discord")
-discord_logger.setLevel(logging.INFO)
 
 # --------------------------------------------------
 # 設定 & 環境変数
 # --------------------------------------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
 PROXY_URL = os.getenv("PROXY_URL")
-ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
 MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # フィードバック受け取り用管理者ID
-MORNING_CHANNEL_ID = int(os.getenv("MORNING_CHANNEL_ID", "0"))  # 朝の通知用チャンネルID
-CREATE_ONETIME_VC_ID = int(os.getenv("CREATE_ONETIME_VC_ID", "0"))  # ワンタイム用トリガーVC ID
 WEB_URL = os.getenv("WEB_URL", "")
 PORT = int(os.getenv("PORT", 10000))
-NEWS_QUERY = os.getenv("NEWS_QUERY", "日本 ニュース")
 
 # --------------------------------------------------
 # Firebase 初期化
@@ -77,82 +66,8 @@ def load_all_data():
     docs = db.collection("verifications").stream()
     return {doc.id: doc.to_dict() for doc in docs}
 
-def add_user_points(user_id, amount):
-    if not db: return 0
-    doc_ref = db.collection("economy").document(str(user_id))
-    doc = doc_ref.get()
-    current = doc.to_dict().get("points", 0) if doc.exists else 0
-    doc_ref.set({"points": current + amount}, merge=True)
-    return current + amount
-
-def get_user_points(user_id):
-    if not db: return 0
-    doc = db.collection("economy").document(str(user_id)).get()
-    return doc.to_dict().get("points", 0) if doc.exists else 0
-
 # --------------------------------------------------
-# 天気予報 & ニュースリアルタイム取得関数
-# --------------------------------------------------
-async def get_weather_info():
-    """ Open-Meteo API で東京の天気を取得（無料・APIキー不要） """
-    url = "https://api.open-meteo.com/v1/forecast?latitude=35.6895&longitude=139.6917&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
-    weather_codes = {
-        0: "☀️ 晴れ", 1: "🌤️ おおむね晴れ", 2: "⛅ 時々曇り", 3: "☁️ 曇り",
-        45: "霧", 48: "霧氷", 51: "🌦️ 小雨", 61: "☔ 雨", 71: "❄️ 雪",
-        80: "🌦️ 俄雨", 95: "⚡ 雷雨"
-    }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    code = data["daily"]["weathercode"][0]
-                    temp_max = data["daily"]["temperature_2m_max"][0]
-                    temp_min = data["daily"]["temperature_2m_min"][0]
-                    weather_str = weather_codes.get(code, "不明")
-                    return f"**東京の天気:** {weather_str}\n**最高気温:** {temp_max}°C / **最低気温:** {temp_min}°C"
-    except Exception as e:
-        print(f"天気情報の取得失敗: {e}")
-    return "天気情報の取得に失敗しました。"
-
-async def get_top_news(count=5):
-    """ Google News RSS から最新ニュースを取得 """
-    encoded_query = urllib.parse.quote(NEWS_QUERY)
-    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ja&gl=JP&ceid=JP:ja"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    xml_text = await response.text()
-                    root = ET.fromstring(xml_text)
-                    items = root.findall(".//item")[:count]
-                    
-                    news_list = []
-                    for i, item in enumerate(items, 1):
-                        title = item.find("title").text if item.find("title") is not None else "タイトルなし"
-                        link = item.find("link").text if item.find("link") is not None else ""
-                        news_list.append(f"{i}. [{title}]({link})")
-                    return "\n".join(news_list)
-    except Exception as e:
-        print(f"ニュースの取得失敗: {e}")
-    return "ニュースの取得に失敗しました。"
-
-async def create_morning_embed():
-    """ 朝の定期メッセージ用 Embed を作成 """
-    embed = discord.Embed(
-        title="🌅 おはようございます！朝のお知らせです",
-        color=discord.Color.gold(),
-        timestamp=datetime.datetime.now(datetime.timezone.utc)
-    )
-    weather = await get_weather_info()
-    news = await get_top_news(5)
-    
-    embed.add_field(name="🌤️ 今日の天気予報", value=weather, inline=False)
-    embed.add_field(name="📰 新着トピック 5選", value=news, inline=False)
-    return embed
-
-# --------------------------------------------------
-# Flask Webサーバー
+# Flask Webサーバー（IP取得＆認証）
 # --------------------------------------------------
 app = Flask(__name__)
 
@@ -208,6 +123,7 @@ def home():
 
 @app.route("/verify/<int:user_id>", methods=["GET", "POST"])
 def verify(user_id):
+    # 📌 IPアドレスの取得（Render等のプロキシ経由に対応）
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
     if ip_address and "," in ip_address:
         ip_address = ip_address.split(",")[0].strip()
@@ -221,14 +137,18 @@ def verify(user_id):
             member = guild.get_member(user_id)
             if member:
                 username = member.display_name
+                # ロール付与
                 if MEMBER_ROLE_ID != 0:
                     role = guild.get_role(MEMBER_ROLE_ID)
                     if role:
                         asyncio.run_coroutine_threadsafe(member.add_roles(role), discord_bot.loop)
                 roles_list = [r.name for r in member.roles if r.name != "@everyone"]
 
+        # 📌 IPアドレスを含めて Firestore に保存
         save_user_data(user_id, {
-            "username": username, "roles": roles_list, "ip": ip_address,
+            "username": username,
+            "roles": roles_list,
+            "ip": ip_address,
             "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         })
         return jsonify({"status": "success", "message": "認証完了"})
@@ -236,44 +156,15 @@ def verify(user_id):
     return render_template_string(HTML_TEMPLATE)
 
 # --------------------------------------------------
-# Discord Bot クラス & 定期タスク
+# Discord Bot クラス
 # --------------------------------------------------
 class MyBot(commands.Bot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.user_cooldowns = {}
-        self.onetime_channels = {}
-
     async def setup_hook(self):
         synced = await self.tree.sync()
-        if not self.morning_task.is_running():
-            self.morning_task.start()
         print(f"✅ スラッシュコマンド同期完了: {len(synced)} 件")
-
-    @tasks.loop(minutes=1)
-    async def morning_task(self):
-        """ 毎朝 07:00 (JST) に定時通知を行うタスク """
-        jst = datetime.timezone(datetime.timedelta(hours=9))
-        now = datetime.datetime.now(jst)
-        
-        if now.hour == 7 and now.minute == 0:
-            if MORNING_CHANNEL_ID == 0:
-                return
-            channel = self.get_channel(MORNING_CHANNEL_ID)
-            if not channel:
-                return
-
-            embed = await create_morning_embed()
-            await channel.send(embed=embed)
-            await asyncio.sleep(60)  # 同一分内の重複送信を回避
-
-    @morning_task.before_loop
-    async def before_morning_task(self):
-        await self.wait_until_ready()
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.voice_states = True
 
 discord_bot = MyBot(command_prefix="!", intents=intents, proxy=PROXY_URL)
 
@@ -282,82 +173,22 @@ async def on_ready():
     print("========================================")
     print("✅ Discord Bot 接続成功")
     print(f"🤖 Bot: {discord_bot.user}")
-    print(f"🆔 ID: {discord_bot.user.id if discord_bot.user else 'unknown'}")
-    print(f"🏠 Guild数: {len(discord_bot.guilds)}")
     print("========================================")
 
-@discord_bot.event
-async def on_disconnect():
-    print("⚠️️ Discord Gateway から切断されました")
-
-@discord_bot.event
-async def on_resumed():
-    print("🔄 Discord Gateway に再接続しました")
-
-@discord_bot.event
-async def on_error(event, *args, **kwargs):
-    import traceback
-    print(f"❌ Discordイベントエラー: {event}")
-    traceback.print_exc()
-
 # --------------------------------------------------
-# イベントハンドラー
+# スラッシュコマンド (/rule, /kuwakuwa)
 # --------------------------------------------------
-@discord_bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot or not message.guild:
-        return
 
-    now = datetime.datetime.now().timestamp()
-    last_time = discord_bot.user_cooldowns.get(message.author.id, 0)
-    if now - last_time > 30:
-        discord_bot.user_cooldowns[message.author.id] = now
-        add_user_points(message.author.id, 5)
-
-@discord_bot.event
-async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    guild = member.guild
-
-    if after.channel and after.channel.id == CREATE_ONETIME_VC_ID:
-        category = after.channel.category
-        new_vc = await guild.create_voice_channel(f"🔊-{member.display_name}の部屋", category=category)
-        new_txt = await guild.create_text_channel(f"💬-{member.display_name}専用チャット", category=category)
-        
-        await new_txt.set_permissions(guild.default_role, read_messages=False)
-        await new_txt.set_permissions(member, read_messages=True, send_messages=True)
-
-        discord_bot.onetime_channels[new_vc.id] = new_txt.id
-        await member.move_to(new_vc)
-        await new_txt.send(f"{member.mention} 専用のテキストチャットを作成しました。全員が退室すると自動削除されます。")
-
-    if before.channel and before.channel.id in discord_bot.onetime_channels:
-        if len(before.channel.members) == 0:
-            txt_id = discord_bot.onetime_channels.pop(before.channel.id, None)
-            if txt_id:
-                txt_chan = guild.get_channel(txt_id)
-                if txt_chan:
-                    await txt_chan.delete()
-            await before.channel.delete()
-
-# --------------------------------------------------
-# スラッシュコマンド
-# --------------------------------------------------
-@discord_bot.tree.command(
-    name="wake_up",
-    description="朝の挨拶・天気予報・最新ニュース5件を取得して表示します"
-)
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-async def wake_up_command(interaction: discord.Interaction):
-    await interaction.response.defer()
-    embed = await create_morning_embed()
-    await interaction.followup.send(embed=embed)
-
+# 1. /rule コマンド
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 async def rule_command(interaction: discord.Interaction):
-    embed = discord.Embed(title="サーバー参加ルール", description="下のボタンを押してWebページでルールを承諾してください。", color=0x3498db)
+    embed = discord.Embed(
+        title="サーバー参加ルール",
+        description="下のボタンを押してWebページでルールを承諾してください。",
+        color=0x3498db
+    )
     view = discord.ui.View()
     btn = discord.ui.Button(label="ルールを承諾する", style=discord.ButtonStyle.primary)
     
@@ -368,40 +199,8 @@ async def rule_command(interaction: discord.Interaction):
     view.add_item(btn)
     await interaction.response.send_message(embed=embed, view=view)
 
-@discord_bot.tree.command(name="ban_user", description="ユーザーをBANし、記録された認証情報を確認してBANします")
-@app_commands.allowed_installs(guilds=True, users=False)
-@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-@app_commands.checks.has_permissions(ban_members=True)
-async def ban_user_command(interaction: discord.Interaction, member: discord.Member, reason: str = "規約違反"):
-    await interaction.response.defer()
-    ip_address = "未記録"
-    if db:
-        user_doc = db.collection("verifications").document(str(member.id)).get()
-        ip_address = user_doc.to_dict().get("ip", "未記録") if user_doc.exists else "データなし"
-    
-    location_info = "不明"
-    if ip_address not in ["データなし", "未記録"]:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"http://ip-api.com/json/{ip_address}?lang=ja", timeout=3) as res:
-                    if res.status == 200:
-                        data = await res.json()
-                        if data.get("status") == "success":
-                            location_info = f"{data.get('regionName','')} {data.get('city','')} ({data.get('isp','')})"
-        except Exception: pass
-
-    try:
-        await member.ban(reason=reason, delete_message_days=0)
-        embed = discord.Embed(title="💥 ユーザーをBANしました", color=discord.Color.dark_red())
-        embed.add_field(name="対象", value=f"{member.mention} (`{member.id}`)", inline=False)
-        embed.add_field(name="理由", value=reason, inline=True)
-        embed.add_field(name="IPアドレス", value=f"`{ip_address}`", inline=False)
-        embed.add_field(name="推定位置", value=f"`{location_info}`", inline=False)
-        await interaction.followup.send(embed=embed)
-    except Exception as e:
-        await interaction.followup.send(f"❌ BAN失敗: {e}")
-
-@discord_bot.tree.command(name="kuwakuwa", description="認証メンバー一覧を取得")
+# 2. /kuwakuwa コマンド
+@discord_bot.tree.command(name="kuwakuwa", description="認証メンバーおよびIPアドレス一覧を取得します")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 @app_commands.default_permissions(administrator=True)
@@ -410,58 +209,18 @@ async def kuwakuwa_command(interaction: discord.Interaction):
     if not data:
         await interaction.response.send_message("記録はありません。", ephemeral=True)
         return
-    lines = ["📜 **【ルール承諾メンバー 一覧】**\n"]
+    
+    lines = ["📜 **【ルール承諾メンバー・IP情報一覧】**\n"]
     for uid, info in data.items():
-        lines.append(f"・{info.get('username','Unknown')} │ IP: {info.get('ip','不明')}")
+        username = info.get('username', 'Unknown')
+        ip = info.get('ip', '未記録')
+        updated_at = info.get('updated_at', '日時不明')
+        lines.append(f"・**{username}** (ID: `{uid}`) │ IP: `{ip}` │ ({updated_at})")
+    
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-@discord_bot.tree.command(name="balance", description="自分の所持ポイントを確認します")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-async def balance_command(interaction: discord.Interaction):
-    pts = get_user_points(interaction.user.id)
-    await interaction.response.send_message(f"💰 {interaction.user.mention} さんの所持ポイント: **{pts} PT**", ephemeral=True)
-
-@discord_bot.tree.command(name="daily", description="デイリーログインボーナス（100PT）を獲得します")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-async def daily_command(interaction: discord.Interaction):
-    pts = add_user_points(interaction.user.id, 100)
-    await interaction.response.send_message(f"🎁 デイリーボーナス100PTを受け取りました！ (現在: {pts} PT)", ephemeral=True)
-
-@discord_bot.tree.command(name="feedback", description="管理者へご意見・ご要望を送信します")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-async def feedback_command(interaction: discord.Interaction, message: str):
-    if ADMIN_USER_ID == 0:
-        await interaction.response.send_message("❌ 管理者IDが設定されていません。", ephemeral=True)
-        return
-    admin = await discord_bot.fetch_user(ADMIN_USER_ID)
-    if admin:
-        embed = discord.Embed(title="📩 サーバーフィードバック受信", description=message, color=discord.Color.blue())
-        embed.set_footer(text=f"送信元ユーザーID: {interaction.user.id}")
-        await admin.send(embed=embed)
-        await interaction.response.send_message("✅ 管理者へメッセージを送信しました！", ephemeral=True)
-
-@discord_bot.tree.command(name="pvc", description="特定の人だけが入れるプライベート部屋を作成します")
-@app_commands.allowed_installs(guilds=True, users=False)
-@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-async def pvc_command(interaction: discord.Interaction, target_user: discord.Member):
-    guild = interaction.guild
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False, connect=False),
-        interaction.user: discord.PermissionOverwrite(read_messages=True, connect=True, send_messages=True),
-        target_user: discord.PermissionOverwrite(read_messages=True, connect=True, send_messages=True),
-    }
-    cat = await guild.create_category(f"🔒-{interaction.user.display_name}の秘密部屋", overwrites=overwrites)
-    await guild.create_voice_channel("通話部屋", category=cat)
-    txt = await guild.create_text_channel("専用チャット", category=cat)
-    
-    await txt.send(f"{interaction.user.mention} {target_user.mention} プライベート部屋を作成しました！")
-    await interaction.response.send_message("✅ プライベート部屋を作成しました！", ephemeral=True)
-
 # --------------------------------------------------
-# リトライ付きBot起動処理
+# Bot起動処理 (リトライ機能付き)
 # --------------------------------------------------
 async def start_bot_with_retry():
     if not BOT_TOKEN:
@@ -477,14 +236,14 @@ async def start_bot_with_retry():
             break
         except discord.errors.HTTPException as e:
             if e.status in (429, 502, 504):
-                print(f"⚠️ Discord API レート制限/通信エラー ({e.status})。{retry_delay} 秒後に再試行します...")
+                print(f"⚠️ Discord API 通信エラー ({e.status})。{retry_delay} 秒後に再試行します...")
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, max_delay)
             else:
                 print(f"❌ Discord HTTP エラー: {e}")
                 await asyncio.sleep(15)
         except Exception as e:
-            print(f"❌ 予期せぬエラーが発生しました: {e}")
+            print(f"❌ エラーが発生しました: {e}")
             await asyncio.sleep(15)
 
 # --------------------------------------------------
