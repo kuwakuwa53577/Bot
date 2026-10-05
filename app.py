@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
 PROXY_URL = os.getenv("PROXY_URL")
 MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
-WEB_URL = os.getenv("WEB_URL", "")
+WEB_URL = os.getenv("WEB_URL", "").rstrip("/")  # 末尾のスラッシュを除去
 PORT = int(os.getenv("PORT", 10000))
 
 # --------------------------------------------------
@@ -123,7 +123,6 @@ def home():
 
 @app.route("/verify/<int:user_id>", methods=["GET", "POST"])
 def verify(user_id):
-    # 📌 IPアドレスの取得（Render等のプロキシ経由に対応）
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
     if ip_address and "," in ip_address:
         ip_address = ip_address.split(",")[0].strip()
@@ -141,10 +140,15 @@ def verify(user_id):
                 if MEMBER_ROLE_ID != 0:
                     role = guild.get_role(MEMBER_ROLE_ID)
                     if role:
-                        asyncio.run_coroutine_threadsafe(member.add_roles(role), discord_bot.loop)
+                        # 安全なイベントループ呼び出しに変更
+                        future = asyncio.run_coroutine_threadsafe(member.add_roles(role), discord_bot.loop)
+                        try:
+                            future.result(timeout=10)
+                        except Exception as e:
+                            print(f"❌ ロール付与エラー: {e}")
+
                 roles_list = [r.name for r in member.roles if r.name != "@everyone"]
 
-        # 📌 IPアドレスを含めて Firestore に保存
         save_user_data(user_id, {
             "username": username,
             "roles": roles_list,
@@ -156,15 +160,36 @@ def verify(user_id):
     return render_template_string(HTML_TEMPLATE)
 
 # --------------------------------------------------
+# Discord Bot UI Views (動的ボタンコンポーネント)
+# --------------------------------------------------
+class RuleVerifyView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # 永続的なボタンとして機能
+
+    @discord.ui.button(label="ルールを承諾する", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
+    async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 📌 押したユーザーのIDをその場で動的に取得してURLを作成
+        user_id = interaction.user.id
+        base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
+        verify_url = f"{base_url}/verify/{user_id}"
+        
+        await interaction.response.send_message(
+            f"専用認証ページ：\n{verify_url}", 
+            ephemeral=True
+        )
+
+# --------------------------------------------------
 # Discord Bot クラス
 # --------------------------------------------------
 class MyBot(commands.Bot):
     async def setup_hook(self):
+        self.add_view(RuleVerifyView())  # 再起動後もボタンが効くように永続化
         synced = await self.tree.sync()
         print(f"✅ スラッシュコマンド同期完了: {len(synced)} 件")
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True  # メンバー情報の取得に必要なインテント
 
 discord_bot = MyBot(command_prefix="!", intents=intents, proxy=PROXY_URL)
 
@@ -189,15 +214,7 @@ async def rule_command(interaction: discord.Interaction):
         description="下のボタンを押してWebページでルールを承諾してください。",
         color=0x3498db
     )
-    view = discord.ui.View()
-    btn = discord.ui.Button(label="ルールを承諾する", style=discord.ButtonStyle.primary)
-    
-    async def btn_callback(inter: discord.Interaction):
-        await inter.response.send_message(f"専用認証ページ：\n{WEB_URL}/verify/{inter.user.id}", ephemeral=True)
-
-    btn.callback = btn_callback
-    view.add_item(btn)
-    await interaction.response.send_message(embed=embed, view=view)
+    await interaction.response.send_message(embed=embed, view=RuleVerifyView())
 
 # 2. /kuwakuwa コマンド
 @discord_bot.tree.command(name="kuwakuwa", description="認証メンバーおよびIPアドレス一覧を取得します")
