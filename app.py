@@ -50,21 +50,33 @@ else:
 
 try:
     db = firestore.client()
-except Exception:
+except Exception as e:
     db = None
+    print(f"⚠️ Firestoreクライアントの取得に失敗しました: {e}")
 
 # --------------------------------------------------
 # Firestore データヘルパー
 # --------------------------------------------------
 def save_user_data(user_id, data_dict):
-    if not db: return
-    doc_ref = db.collection("verifications").document(str(user_id))
-    doc_ref.set(data_dict, merge=True)
+    if not db:
+        print("⚠️ データベースが未接続のためデータを保存できません")
+        return
+    try:
+        doc_ref = db.collection("verifications").document(str(user_id))
+        doc_ref.set(data_dict, merge=True)
+    except Exception as e:
+        print(f"❌ Firestore保存エラー: {e}")
 
 def load_all_data():
-    if not db: return {}
-    docs = db.collection("verifications").stream()
-    return {doc.id: doc.to_dict() for doc in docs}
+    if not db:
+        print("⚠️ データベースが未接続のためデータを読み込めません")
+        return {}
+    try:
+        docs = db.collection("verifications").stream()
+        return {doc.id: doc.to_dict() for doc in docs}
+    except Exception as e:
+        print(f"❌ Firestore読み込みエラー: {e}")
+        return {}
 
 # --------------------------------------------------
 # Flask Webサーバー（IP取得＆認証）
@@ -133,21 +145,25 @@ def verify(user_id):
         roles_list = []
 
         if guild:
-            member = guild.get_member(user_id)
-            if member:
-                username = member.display_name
-                # ロール付与
-                if MEMBER_ROLE_ID != 0:
-                    role = guild.get_role(MEMBER_ROLE_ID)
-                    if role:
-                        # 安全なイベントループ呼び出しに変更
-                        future = asyncio.run_coroutine_threadsafe(member.add_roles(role), discord_bot.loop)
-                        try:
-                            future.result(timeout=10)
-                        except Exception as e:
-                            print(f"❌ ロール付与エラー: {e}")
+            async def process_member():
+                nonlocal username, roles_list
+                try:
+                    member = await guild.fetch_member(user_id)
+                    if member:
+                        username = member.display_name
+                        roles_list = [r.name for r in member.roles if r.name != "@everyone"]
+                        if MEMBER_ROLE_ID != 0:
+                            role = guild.get_role(MEMBER_ROLE_ID)
+                            if role:
+                                await member.add_roles(role)
+                except Exception as e:
+                    print(f"❌ メンバー処理エラー: {e}")
 
-                roles_list = [r.name for r in member.roles if r.name != "@everyone"]
+            future = asyncio.run_coroutine_threadsafe(process_member(), discord_bot.loop)
+            try:
+                future.result(timeout=10)
+            except Exception as e:
+                print(f"❌ 非同期処理タイムアウト/エラー: {e}")
 
         save_user_data(user_id, {
             "username": username,
@@ -164,11 +180,10 @@ def verify(user_id):
 # --------------------------------------------------
 class RuleVerifyView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # 永続的なボタンとして機能
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="ルールを承諾する", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
     async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 📌 押したユーザーのIDをその場で動的に取得してURLを作成
         user_id = interaction.user.id
         base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
         verify_url = f"{base_url}/verify/{user_id}"
@@ -183,13 +198,13 @@ class RuleVerifyView(discord.ui.View):
 # --------------------------------------------------
 class MyBot(commands.Bot):
     async def setup_hook(self):
-        self.add_view(RuleVerifyView())  # 再起動後もボタンが効くように永続化
+        self.add_view(RuleVerifyView())
         synced = await self.tree.sync()
         print(f"✅ スラッシュコマンド同期完了: {len(synced)} 件")
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True  # メンバー情報の取得に必要なインテント
+intents.members = True
 
 discord_bot = MyBot(command_prefix="!", intents=intents, proxy=PROXY_URL)
 
@@ -204,7 +219,6 @@ async def on_ready():
 # スラッシュコマンド (/rule, /kuwakuwa)
 # --------------------------------------------------
 
-# 1. /rule コマンド
 @discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
@@ -216,25 +230,33 @@ async def rule_command(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=RuleVerifyView())
 
-# 2. /kuwakuwa コマンド
 @discord_bot.tree.command(name="kuwakuwa", description="認証メンバーおよびIPアドレス一覧を取得します")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 @app_commands.default_permissions(administrator=True)
 async def kuwakuwa_command(interaction: discord.Interaction):
-    data = load_all_data()
-    if not data:
-        await interaction.response.send_message("記録はありません。", ephemeral=True)
-        return
-    
-    lines = ["📜 **【ルール承諾メンバー・IP情報一覧】**\n"]
-    for uid, info in data.items():
-        username = info.get('username', 'Unknown')
-        ip = info.get('ip', '未記録')
-        updated_at = info.get('updated_at', '日時不明')
-        lines.append(f"・**{username}** (ID: `{uid}`) │ IP: `{ip}` │ ({updated_at})")
-    
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+    try:
+        data = load_all_data()
+        if not data:
+            await interaction.response.send_message("記録はありません（またはデータベースが未接続です）。", ephemeral=True)
+            return
+        
+        lines = ["📜 **【ルール承諾メンバー・IP情報一覧】**\n"]
+        for uid, info in data.items():
+            username = info.get('username', 'Unknown')
+            ip = info.get('ip', '未記録')
+            updated_at = info.get('updated_at', '日時不明')
+            lines.append(f"・**{username}** (ID: `{uid}`) │ IP: `{ip}` │ ({updated_at})")
+        
+        full_message = "\n".join(lines)
+        if len(full_message) > 2000:
+            full_message = full_message[:1950] + "\n...(文字数制限のため省略)"
+
+        await interaction.response.send_message(full_message, ephemeral=True)
+    except Exception as e:
+        print(f"❌ kuwakuwaコマンド実行エラー: {e}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"❌ エラーが発生しました: {e}", ephemeral=True)
 
 # --------------------------------------------------
 # Bot起動処理 (リトライ機能付き)
