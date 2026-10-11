@@ -241,18 +241,34 @@ async def kuwakuwa_command(interaction: discord.Interaction):
             await interaction.response.send_message("記録はありません（またはデータベースが未接続です）。", ephemeral=True)
             return
         
-        lines = ["📜 **【ルール承諾メンバー・IP情報一覧】**\n"]
+        lines = []
         for uid, info in data.items():
             username = info.get('username', 'Unknown')
             ip = info.get('ip', '未記録')
             updated_at = info.get('updated_at', '日時不明')
             lines.append(f"・**{username}** (ID: `{uid}`) │ IP: `{ip}` │ ({updated_at})")
         
-        full_message = "\n".join(lines)
-        if len(full_message) > 2000:
-            full_message = full_message[:1950] + "\n...(文字数制限のため省略)"
+        # 📌 2000文字の制限を超える場合に自動でメッセージを分割して送信する処理
+        current_chunk = "📜 **【ルール承諾メンバー・IP情報一覧】**\n\n"
+        chunks = []
+        
+        for line in lines:
+            # 1行追加すると2000文字を超える場合は新しい塊にする
+            if len(current_chunk) + len(line) + 1 > 1950:
+                chunks.append(current_chunk)
+                current_chunk = ""
+            current_chunk += line + "\n"
+        
+        if current_chunk:
+            chunks.append(current_chunk)
 
-        await interaction.response.send_message(full_message, ephemeral=True)
+        # 最初のメッセージは interaction の返信として送信
+        await interaction.response.send_message(chunks[0], ephemeral=True)
+        
+        # 2つ目以降のメッセージがある場合は follow_up (追加送信) で送る
+        for chunk in chunks[1:]:
+            await interaction.followup.send(chunk, ephemeral=True)
+
     except Exception as e:
         print(f"❌ kuwakuwaコマンド実行エラー: {e}")
         if not interaction.response.is_done():
