@@ -26,6 +26,14 @@ MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
 WEB_URL = os.getenv("WEB_URL", "").rstrip("/")  # 末尾のスラッシュを除去
 PORT = int(os.getenv("PORT", 10000))
 
+# 📌 【追加機能】認証を許可する特定のユーザーID（複数指定可能・カンマ区切りで環境変数に設定可）
+# 例: "123456789012345678,987654321098765432"
+verify_env = os.getenv("VERIFIED_USER_IDS", "")
+if verify_env:
+    VERIFIED_USER_IDS = {int(uid.strip()) for uid in verify_env.split(",") if uid.strip().isdigit()}
+else:
+    VERIFIED_USER_IDS = {1488072800278413500,1481668037286297682,1411674732025221120,1446053386989473944,1481200122866962522,1380211228894560307}  # ← ここに認証を許可したい特定のDiscord IDを入れてください（複数指定可）
+
 # --------------------------------------------------
 # Firebase 初期化
 # --------------------------------------------------
@@ -135,11 +143,27 @@ def home():
 
 @app.route("/verify/<int:user_id>", methods=["GET", "POST"])
 def verify(user_id):
+    # 📌 1. 特定の人（ホワイトリスト）だけが認証できるようにチェック
+    if VERIFIED_USER_IDS and user_id not in VERIFIED_USER_IDS:
+        if request.method == "POST":
+            return jsonify({"status": "error", "message": "あなたはこのサーバーで認証する権限がありません。"}), 403
+        return "❌ 403 Forbidden: あなたはこのサーバーで認証する権限がありません。", 403
+
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
     if ip_address and "," in ip_address:
         ip_address = ip_address.split(",")[0].strip()
 
     if request.method == "POST":
+        # 📌 2. 同じIPアドレスの人がすでに別のIDで認証していないかチェック
+        all_data = load_all_data()
+        for registered_uid, info in all_data.items():
+            if str(registered_uid) != str(user_id) and info.get("ip") == ip_address:
+                print(f"⚠️ 同一IP重複ブロック: IP {ip_address} (既存ID: {registered_uid}, 試行ID: {user_id})")
+                return jsonify({
+                    "status": "error", 
+                    "message": "このIPアドレスからはすでに別のアカウントで認証済みの為、認証できません。"
+                }), 400
+
         guild = discord_bot.guilds[0] if discord_bot.guilds else None
         username = f"User_{user_id}"
         roles_list = []
@@ -185,6 +209,12 @@ class RuleVerifyView(discord.ui.View):
     @discord.ui.button(label="ルールを承諾する", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
     async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
+        
+        # 📌 認証パネルのボタンを押した段階でもホワイトリストのチェックを行う
+        if VERIFIED_USER_IDS and user_id not in VERIFIED_USER_IDS:
+            await interaction.response.send_message("❌ あなたはこのサーバーで認証する権限がありません。", ephemeral=True)
+            return
+
         base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
         verify_url = f"{base_url}/verify/{user_id}"
         
@@ -248,12 +278,10 @@ async def kuwakuwa_command(interaction: discord.Interaction):
             updated_at = info.get('updated_at', '日時不明')
             lines.append(f"・**{username}** (ID: `{uid}`) │ IP: `{ip}` │ ({updated_at})")
         
-        # 📌 2000文字の制限を超える場合に自動でメッセージを分割して送信する処理
         current_chunk = "📜 **【ルール承諾メンバー・IP情報一覧】**\n\n"
         chunks = []
         
         for line in lines:
-            # 1行追加すると2000文字を超える場合は新しい塊にする
             if len(current_chunk) + len(line) + 1 > 1950:
                 chunks.append(current_chunk)
                 current_chunk = ""
@@ -262,10 +290,7 @@ async def kuwakuwa_command(interaction: discord.Interaction):
         if current_chunk:
             chunks.append(current_chunk)
 
-        # 最初のメッセージは interaction の返信として送信
         await interaction.response.send_message(chunks[0], ephemeral=True)
-        
-        # 2つ目以降のメッセージがある場合は follow_up (追加送信) で送る
         for chunk in chunks[1:]:
             await interaction.followup.send(chunk, ephemeral=True)
 
@@ -312,6 +337,7 @@ async def main():
 
     await start_bot_with_retry()
 
+if __name__ ==31 == "__main__": # 修正
 if __name__ == "__main__":
     try:
         asyncio.run(main())
