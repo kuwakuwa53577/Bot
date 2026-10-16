@@ -327,19 +327,20 @@ async def start_bot_with_retry():
             await asyncio.sleep(15)
 
 # --------------------------------------------------
-# メイン実行
+# メイン実行 (Flask と Discord Bot を同時に起動)
 # --------------------------------------------------
-async def main():
-    flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
-    flask_thread.daemon = True
-    flask_thread.start()
-    print(f"🌐 Flask サーバーをポート {PORT} で起動しました")
-
-    await start_bot_with_retry()
-
-if __name__ ==31 == "__main__": # 修正
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("👋 プログラムを終了します。")
+    if not BOT_TOKEN:
+        print("❌ エラー: BOT_TOKEN が設定されていません。")
+    else:
+        # Flaskを別スレッドで起動（Renderのポート監視対策）
+        flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
+        flask_thread.daemon = True
+        flask_thread.start()
+        print(f"🌐 Flask サーバーをポート {PORT} で起動しました")
+
+        # Discord Bot 起動
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print("👋 プログラムを終了します。")
