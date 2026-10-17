@@ -26,13 +26,6 @@ MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
 WEB_URL = os.getenv("WEB_URL", "").rstrip("/")  # 末尾のスラッシュを除去
 PORT = int(os.getenv("PORT", 10000))
 
-# 📌 【追加機能】認証を許可する特定のユーザーID（複数指定可能・カンマ区切りで環境変数に設定可）
-# 以下のif文ごと消す
-if VERIFIED_USER_IDS and user_id not in VERIFIED_USER_IDS:
-    if request.method == "POST":
-        return jsonify({"status": "error", "message": "あなたはこのサーバーで認証する権限がありません。"}), 403
-    return "❌ 403 Forbidden: あなたはこのサーバーで認証する権限がありません。", 403
-
 # --------------------------------------------------
 # Firebase 初期化
 # --------------------------------------------------
@@ -142,19 +135,11 @@ def home():
 
 @app.route("/verify/<int:user_id>", methods=["GET", "POST"])
 def verify(user_id):
-    # 📌 1. 特定の人（ホワイトリスト）だけが認証できるようにチェック
-    if VERIFIED_USER_IDS and user_id not in VERIFIED_USER_IDS:
-        if request.method == "POST":
-            return jsonify({"status": "error", "message": "あなたはこのサーバーで認証する権限がありません。"}), 403
-        return "❌ 403 Forbidden: あなたはこのサーバーで認証する権限がありません。", 403
-
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
     if ip_address and "," in ip_address:
         ip_address = ip_address.split(",")[0].strip()
 
     if request.method == "POST":
-        # ※ 同一IP重複ブロックの処理はここにありましたが、要望により廃止しました。
-
         guild = discord_bot.guilds[0] if discord_bot.guilds else None
         username = f"User_{user_id}"
         roles_list = []
@@ -201,11 +186,6 @@ class RuleVerifyView(discord.ui.View):
     async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
         
-        # 📌 認証パネルのボタンを押した段階でもホワイトリストのチェックを行う
-        if VERIFIED_USER_IDS and user_id not in VERIFIED_USER_IDS:
-            await interaction.response.send_message("❌ あなたはこのサーバーで認証する権限がありません。", ephemeral=True)
-            return
-
         base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
         verify_url = f"{base_url}/verify/{user_id}"
         
