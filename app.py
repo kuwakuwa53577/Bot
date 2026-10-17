@@ -27,12 +27,11 @@ WEB_URL = os.getenv("WEB_URL", "").rstrip("/")  # 末尾のスラッシュを除
 PORT = int(os.getenv("PORT", 10000))
 
 # 📌 【追加機能】認証を許可する特定のユーザーID（複数指定可能・カンマ区切りで環境変数に設定可）
-# 例: "123456789012345678,987654321098765432"
 verify_env = os.getenv("VERIFIED_USER_IDS", "")
 if verify_env:
     VERIFIED_USER_IDS = {int(uid.strip()) for uid in verify_env.split(",") if uid.strip().isdigit()}
 else:
-    VERIFIED_USER_IDS = {1488072800278413500,1481668037286297682,1411674732025221120,1446053386989473944,1481200122866962522,1380211228894560307}  # ← ここに認証を許可したい特定のDiscord IDを入れてください（複数指定可）
+    VERIFIED_USER_IDS = {1488072800278413500,1481668037286297682,1411674732025221120,1446053386989473944,1481200122866962522,1380211228894560307}
 
 # --------------------------------------------------
 # Firebase 初期化
@@ -154,15 +153,7 @@ def verify(user_id):
         ip_address = ip_address.split(",")[0].strip()
 
     if request.method == "POST":
-        # 📌 2. 同じIPアドレスの人がすでに別のIDで認証していないかチェック
-        all_data = load_all_data()
-        for registered_uid, info in all_data.items():
-            if str(registered_uid) != str(user_id) and info.get("ip") == ip_address:
-                print(f"⚠️ 同一IP重複ブロック: IP {ip_address} (既存ID: {registered_uid}, 試行ID: {user_id})")
-                return jsonify({
-                    "status": "error", 
-                    "message": "このIPアドレスからはすでに別のアカウントで認証済みの為、認証できません。"
-                }), 400
+        # ※ 同一IP重複ブロックの処理はここにありましたが、要望により廃止しました。
 
         guild = discord_bot.guilds[0] if discord_bot.guilds else None
         username = f"User_{user_id}"
