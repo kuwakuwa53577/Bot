@@ -27,11 +27,11 @@ WEB_URL = os.getenv("WEB_URL", "").rstrip("/")  # 末尾のスラッシュを除
 PORT = int(os.getenv("PORT", 10000))
 
 # 📌 【追加機能】認証を許可する特定のユーザーID（複数指定可能・カンマ区切りで環境変数に設定可）
-verify_env = os.getenv("VERIFIED_USER_IDS", "")
-if verify_env:
-    VERIFIED_USER_IDS = {int(uid.strip()) for uid in verify_env.split(",") if uid.strip().isdigit()}
-else:
-    VERIFIED_USER_IDS = {1488072800278413500,1481668037286297682,1411674732025221120,1446053386989473944,1481200122866962522,1380211228894560307}
+# 以下のif文ごと消す
+if VERIFIED_USER_IDS and user_id not in VERIFIED_USER_IDS:
+    if request.method == "POST":
+        return jsonify({"status": "error", "message": "あなたはこのサーバーで認証する権限がありません。"}), 403
+    return "❌ 403 Forbidden: あなたはこのサーバーで認証する権限がありません。", 403
 
 # --------------------------------------------------
 # Firebase 初期化
