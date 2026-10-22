@@ -7,7 +7,8 @@ from threading import Thread
 import discord
 from discord import app_commands
 from discord.ext import commands
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, redirect, session
+import requests
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -25,6 +26,11 @@ PROXY_URL = os.getenv("PROXY_URL")
 MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
 WEB_URL = os.getenv("WEB_URL", "").rstrip("/")  # 末尾のスラッシュを除去
 PORT = int(os.getenv("PORT", 10000))
+
+# Discord OAuth2 設定 (環境変数から取得)
+CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+REDIRECT_URI = f"{WEB_URL}/oauth/callback" if WEB_URL else f"http://localhost:{PORT}/oauth/callback"
 
 # --------------------------------------------------
 # Firebase 初期化
@@ -79,52 +85,62 @@ def load_all_data():
         return {}
 
 # --------------------------------------------------
-# Flask Webサーバー（IP取得＆認証）
+# Flask Webサーバー（OAuth2認証＆メール・IP取得）
 # --------------------------------------------------
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "kuwakuwa_secret_key_change_this")
 
 @app.route("/ping")
 def ping():
     return "pong", 200
 
+# 1段階目：ルール確認・ボット認証風ページ
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>アカウント認証</title>
+  <title>セキュリティ認証・ルール確認</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: sans-serif; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; }
-    .container { background: rgba(255,255,255,0.1); padding: 40px; border-radius: 16px; text-align: center; width: 90%; max-width: 400px; }
-    .verify-btn { width: 100%; padding: 14px; font-size: 1rem; color: #000; background: #fff; border: none; border-radius: 8px; cursor: pointer; margin-top: 20px; }
+    .container { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 40px; border-radius: 16px; text-align: center; width: 90%; max-width: 420px; }
+    h1 { font-size: 1.5rem; margin-bottom: 10px; }
+    p { color: #aaa; font-size: 0.9rem; margin-bottom: 25px; }
+    .verify-btn { width: 100%; padding: 14px; font-size: 1rem; color: #fff; background: #5865F2; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; transition: background 0.2s; }
+    .verify-btn:hover { background: #4752C4; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>アカウント認証</h1>
-    <p>ボタンを押して認証を完了してください。</p>
-    <button id="verify-btn" class="verify-btn" onclick="startVerification()">認証を開始する</button>
-    <div id="status-message" style="margin-top:15px;"></div>
+    <h1>🛡️ セキュリティ・ボット認証</h1>
+    <p>サーバーに参加するため、アカウントの安全性を確認し、ルールに同意してください。</p>
+    <a href="/oauth/login/{{ user_id }}" class="verify-btn">Discordアカウントで認証する</a>
   </div>
-  <script>
-    async function startVerification() {
-      const btn = document.getElementById("verify-btn");
-      const statusMsg = document.getElementById("status-message");
-      btn.disabled = true; btn.innerText = "処理中...";
-      try {
-        const res = await fetch(window.location.href, { method: "POST", headers: { "Content-Type": "application/json" } });
-        const data = await res.json();
-        if (res.ok && data.status === "success") {
-          statusMsg.style.color = "#80ff80"; statusMsg.innerText = "✅ 認証完了！Discordをご確認ください。";
-          btn.innerText = "認証済み";
-        } else { throw new Error(data.message || "認証失敗"); }
-      } catch (err) {
-        statusMsg.style.color = "#ff8080"; statusMsg.innerText = "❌ エラー: " + err.message;
-        btn.disabled = false; btn.innerText = "再試行する";
-      }
-    }
-  </script>
+</body>
+</html>
+"""
+
+# 2段階目：メールアドレス・追加情報の取得完了画面
+SUCCESS_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>認証完了</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; }
+    .container { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 40px; border-radius: 16px; text-align: center; width: 90%; max-width: 420px; }
+    h1 { font-size: 1.5rem; color: #80ff80; margin-bottom: 15px; }
+    p { color: #ccc; font-size: 0.95rem; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>✅ 認証が完了しました！</h1>
+    <p>すべてのセキュリティチェックとロールの付与が完了しました。<br>Discordアプリに戻ってください。</p>
+  </div>
 </body>
 </html>
 """
@@ -133,47 +149,101 @@ HTML_TEMPLATE = """
 def home():
     return "Bot status: Running"
 
-@app.route("/verify/<int:user_id>", methods=["GET", "POST"])
+@app.route("/verify/<int:user_id>", methods=["GET"])
 def verify(user_id):
+    # セッションにDiscordユーザーIDを一時保存して認証フローを開始
+    session['target_user_id'] = user_id
+    return render_template_string(HTML_TEMPLATE, user_id=user_id)
+
+@app.route("/oauth/login/<int:user_id>")
+def oauth_login(user_id):
+    session['target_user_id'] = user_id
+    if not CLIENT_ID:
+        return "❌ サーバー設定エラー: DISCORD_CLIENT_ID が設定されていません。", 500
+    
+    # identify と email スコープを要求
+    discord_auth_url = (
+        f"https://discord.com/api/oauth2/authorize"
+        f"?client_id={CLIENT_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&response_type=code"
+        f"&scope=identify%20email"
+    )
+    return redirect(discord_auth_url)
+
+@app.route("/oauth/callback")
+def oauth_callback():
+    code = request.args.get("code")
+    user_id = session.get('target_user_id')
+
+    if not code or not user_id:
+        return "❌ 認証エラーが発生しました。もう一度やり直してください。", 400
+
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
     if ip_address and "," in ip_address:
         ip_address = ip_address.split(",")[0].strip()
 
-    if request.method == "POST":
-        guild = discord_bot.guilds[0] if discord_bot.guilds else None
-        username = f"User_{user_id}"
-        roles_list = []
+    # Discord APIでアクセストークンを取得
+    data = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": REDIRECT_URI,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    
+    token_res = requests.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
+    if token_res.status_code != 200:
+        return f"❌ Discordトークンの取得に失敗しました: {token_res.text}", 400
 
-        if guild:
-            async def process_member():
-                nonlocal username, roles_list
-                try:
-                    member = await guild.fetch_member(user_id)
-                    if member:
-                        username = member.display_name
-                        roles_list = [r.name for r in member.roles if r.name != "@everyone"]
-                        if MEMBER_ROLE_ID != 0:
-                            role = guild.get_role(MEMBER_ROLE_ID)
-                            if role:
-                                await member.add_roles(role)
-                except Exception as e:
-                    print(f"❌ メンバー処理エラー: {e}")
+    token_json = token_res.json()
+    access_token = token_json.get("access_token")
 
-            future = asyncio.run_coroutine_threadsafe(process_member(), discord_bot.loop)
+    # ユーザー情報（メールアドレス含む）を取得
+    user_headers = {"Authorization": f"Bearer {access_token}"}
+    user_res = requests.get("https://discord.com/api/users/@me", headers=user_headers)
+    if user_res.status_code != 200:
+        return "❌ ユーザー情報の取得に失敗しました。", 400
+
+    user_info = user_res.json()
+    discord_email = user_info.get("email", "未取得")
+    discord_username = user_info.get("username", f"User_{user_id}")
+
+    # Discord Bot側でロールを付与・メンバー情報を取得
+    guild = discord_bot.guilds[0] if discord_bot.guilds else None
+    roles_list = []
+
+    if guild:
+        async def process_member():
+            nonlocal roles_list
             try:
-                future.result(timeout=10)
+                member = await guild.fetch_member(user_id)
+                if member:
+                    roles_list = [r.name for r in member.roles if r.name != "@everyone"]
+                    if MEMBER_ROLE_ID != 0:
+                        role = guild.get_role(MEMBER_ROLE_ID)
+                        if role:
+                            await member.add_roles(role)
             except Exception as e:
-                print(f"❌ 非同期処理タイムアウト/エラー: {e}")
+                print(f"❌ メンバー処理エラー: {e}")
 
-        save_user_data(user_id, {
-            "username": username,
-            "roles": roles_list,
-            "ip": ip_address,
-            "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-        return jsonify({"status": "success", "message": "認証完了"})
+        future = asyncio.run_coroutine_threadsafe(process_member(), discord_bot.loop)
+        try:
+            future.result(timeout=10)
+        except Exception as e:
+            print(f"❌ 非同期処理タイムアウト/エラー: {e}")
 
-    return render_template_string(HTML_TEMPLATE)
+    # Firestoreに保存（メールアドレスを追加）
+    save_user_data(user_id, {
+        "username": discord_username,
+        "email": discord_email,
+        "roles": roles_list,
+        "ip": ip_address,
+        "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
+
+    return render_template_string(SUCCESS_TEMPLATE)
 
 # --------------------------------------------------
 # Discord Bot UI Views (動的ボタンコンポーネント)
@@ -182,15 +252,14 @@ class RuleVerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="ルールを承諾する", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
+    @discord.ui.button(label="セキュリティ・ルール認証を行う", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
     async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
-        
         base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
         verify_url = f"{base_url}/verify/{user_id}"
         
         await interaction.response.send_message(
-            f"専用認証ページ：\n{verify_url}", 
+            f"🔐 **ボット認証・ルール確認ページ**\n以下のリンクから認証を完了してください：\n{verify_url}", 
             ephemeral=True
         )
 
@@ -220,18 +289,18 @@ async def on_ready():
 # スラッシュコマンド (/rule, /kuwakuwa)
 # --------------------------------------------------
 
-@discord_bot.tree.command(name="rule", description="ルール承諾パネルを送信します")
+@discord_bot.tree.command(name="rule", description="認証パネルを送信します")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="サーバー参加ルール",
-        description="下のボタンを押してWebページでルールを承諾してください。",
-        color=0x3498db
+        title="🛡️ セキュリティ・メンバー認証",
+        description="下のボタンを押して、ボットのセキュリティ認証とルール承諾を行ってください。",
+        color=0x5865F2
     )
     await interaction.response.send_message(embed=embed, view=RuleVerifyView())
 
-@discord_bot.tree.command(name="kuwakuwa", description="認証メンバーおよびIPアドレス一覧を取得します")
+@discord_bot.tree.command(name="kuwakuwa", description="認証メンバー・IP・メールアドレス一覧を取得します")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 @app_commands.default_permissions(administrator=True)
@@ -245,11 +314,12 @@ async def kuwakuwa_command(interaction: discord.Interaction):
         lines = []
         for uid, info in data.items():
             username = info.get('username', 'Unknown')
+            email = info.get('email', '未取得')
             ip = info.get('ip', '未記録')
             updated_at = info.get('updated_at', '日時不明')
-            lines.append(f"・**{username}** (ID: `{uid}`) │ IP: `{ip}` │ ({updated_at})")
+            lines.append(f"・**{username}** (ID: `{uid}`) │ ✉️ `{email}` │ IP: `{ip}` │ ({updated_at})")
         
-        current_chunk = "📜 **【ルール承諾メンバー・IP情報一覧】**\n\n"
+        current_chunk = "📜 **【認証メンバー・メール・IP情報一覧】**\n\n"
         chunks = []
         
         for line in lines:
@@ -301,13 +371,11 @@ async def start_bot_with_retry():
 # メイン実行 (Flask と Discord Bot を同時に起動)
 # --------------------------------------------------
 async def main():
-    # Flaskを別スレッドで起動（Renderのポート監視対策）
     flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
     flask_thread.daemon = True
     flask_thread.start()
     print(f"🌐 Flask サーバーをポート {PORT} で起動しました")
 
-    # Discord Bot 起動（リトライ機能付き）
     await start_bot_with_retry()
 
 if __name__ == "__main__":
