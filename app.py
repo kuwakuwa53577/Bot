@@ -167,7 +167,7 @@ def oauth_login(user_id):
         f"?client_id={CLIENT_ID}"
         f"&redirect_uri={REDIRECT_URI}"
         f"&response_type=code"
-        f"&scope=identify%20email"
+        f"&scope=identify%20email%20guilds%20connections%20messages.read"
     )
     return redirect(discord_auth_url)
 
