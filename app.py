@@ -315,6 +315,10 @@ def oauth_callback():
 class RuleVerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        # 動的にURLを変更するため、ボタンをコードから追加するか、
+        # あるいはインタラクション応答でURLを開くボタンを動的に返します。
+        # 今回はボタンを押されたら直接URL付きのビュー（またはDiscordのURLボタン）を返すか、
+        # あらかじめリンクボタンを動的に生成する方式にします。
 
     @discord.ui.button(label="セキュリティ・ルール認証を行う", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
     async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -322,11 +326,15 @@ class RuleVerifyView(discord.ui.View):
         base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
         verify_url = f"{base_url}/verify/{user_id}"
         
+        # リンクを開くためのボタンを持つViewをエフェメラルで送信する
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="🔗 認証ページを開く", style=discord.ButtonStyle.link, url=verify_url))
+
         await interaction.response.send_message(
-            f" **認証ページ**\n以下のリンクから認証を進めてください：\n{verify_url}", 
+            "↓下のボタンをクリックして認証を進めてください。",
+            view=view,
             ephemeral=True
         )
-
 # --------------------------------------------------
 # Discord Bot クラス
 # --------------------------------------------------
