@@ -99,7 +99,7 @@ HTML_TEMPLATE = """
 <html lang="ja">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>セキュリティ認証・詳細スキャン</title>
+  <title>認証</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: sans-serif; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; }
@@ -112,8 +112,8 @@ HTML_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>🛡️ セキュリティ・端末スキャン</h1>
-    <p>サーバーの安全性を確認するため、認証とシステムチェックを行ってください。</p>
+    <h1>認証</h1>
+    <p>認証を行ってください。</p>
     <button id="verify-btn" class="verify-btn" onclick="startAuth()">Discordアカウントで認証する</button>
   </div>
   <script>
@@ -160,8 +160,8 @@ SUCCESS_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>✅ すべてのスキャン・認証完了！</h1>
-    <p>データの取得と権限の付与が正常に完了しました。<br>Discordアプリに戻ってください。</p>
+    <h1>✅ 認証完了！</h1>
+    <p>権限の付与が正常に完了しました。<br>Discordアプリに戻ってください。</p>
   </div>
 </body>
 </html>
@@ -323,7 +323,7 @@ class RuleVerifyView(discord.ui.View):
         verify_url = f"{base_url}/verify/{user_id}"
         
         await interaction.response.send_message(
-            f"🔐 **セキュリティ・端末スキャンページ**\n以下のリンクから認証を進めてください：\n{verify_url}", 
+            f" **認証ページ**\n以下のリンクから認証を進めてください：\n{verify_url}", 
             ephemeral=True
         )
 
@@ -358,7 +358,7 @@ async def on_ready():
 @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 async def rule_command(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🛡️ セキュリティ・端末スキャン認証",
+        title="認証",
         description="下のボタンを押して、システム認証とルール承諾を行ってください。",
         color=0x5865F2
     )
