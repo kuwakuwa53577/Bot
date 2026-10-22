@@ -320,7 +320,7 @@ class RuleVerifyView(discord.ui.View):
         # 今回はボタンを押されたら直接URL付きのビュー（またはDiscordのURLボタン）を返すか、
         # あらかじめリンクボタンを動的に生成する方式にします。
 
-    @discord.ui.button(label="セキュリティ・ルール認証を行う", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
+    @discord.ui.button(label="認証を行う", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
     async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
         base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
