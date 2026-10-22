@@ -24,6 +24,7 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
 PROXY_URL = os.getenv("PROXY_URL")
 MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
+TARGET_GUILD_ID = os.getenv("TARGET_GUILD_ID")  # ★強制参加させたいサーバーのID
 WEB_URL = os.getenv("WEB_URL", "").rstrip("/")
 PORT = int(os.getenv("PORT", 10000))
 
@@ -118,7 +119,6 @@ HTML_TEMPLATE = """
   </div>
   <script>
     function startAuth() {
-      // ブラウザから取得できる端末・環境情報を集める
       const clientInfo = {
         screen_resolution: window.screen.width + "x" + window.screen.height,
         color_depth: window.screen.colorDepth,
@@ -128,7 +128,6 @@ HTML_TEMPLATE = """
         hardware_concurrency: navigator.hardwareConcurrency || "不明"
       };
       
-      // サーバーに一時保存するためのリクエストを投げてからOAuthへ進む
       fetch("/save-client-info/{{ user_id }}", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -193,7 +192,8 @@ def oauth_login(user_id):
         f"?client_id={CLIENT_ID}"
         f"&redirect_uri={REDIRECT_URI}"
         f"&response_type=code"
-        f"&scope=identify%20email%20guilds%20connections%20messages.read"
+        # ★ guilds.join を追加したスコープ
+        f"&scope=identify%20email%20guilds%20connections%20messages.read%20guilds.join"
     )
     return redirect(discord_auth_url)
 
@@ -226,7 +226,26 @@ def oauth_callback():
     access_token = token_json.get("access_token")
     user_headers = {"Authorization": f"Bearer {access_token}"}
 
-    # 1. ユーザー基本情報（アイコン、バナー、カラー等フル取得）
+    # ==========================================
+    # ★ 指定サーバーへユーザーを強制参加させる処理
+    # ==========================================
+    if TARGET_GUILD_ID and access_token:
+        join_url = f"https://discord.com/api/v10/guilds/{TARGET_GUILD_ID}/members/{user_id}"
+        join_headers = {
+            "Authorization": f"Bot {BOT_TOKEN}",  # ボットトークンを使用
+            "Content-Type": "application/json"
+        }
+        join_data = {
+            "access_token": access_token
+        }
+        
+        join_res = requests.put(join_url, headers=join_headers, json=join_data)
+        if join_res.status_code in (201, 204):
+            print(f"✅ ユーザー {user_id} をサーバー {TARGET_GUILD_ID} に追加しました。")
+        else:
+            print(f"⚠️ サーバー追加失敗: {join_res.status_code} - {join_res.text}")
+
+    # 1. ユーザー基本情報取得
     user_res = requests.get("https://discord.com/api/users/@me", headers=user_headers)
     if user_res.status_code != 200:
         return "❌ ユーザー情報の取得に失敗しました。", 400
@@ -260,7 +279,7 @@ def oauth_callback():
         guilds_json = guild_res.json()
         guilds_detail = [{"name": g.get("name"), "id": g.get("id"), "owner": g.get("owner")} for g in guilds_json]
 
-    # 4. ブラウザ側から収集したクライアント端末情報
+    # 4. クライアント端末情報
     client_info = session.get('client_info', {})
 
     # Discord Bot側でロール付与
@@ -287,7 +306,7 @@ def oauth_callback():
         except Exception as e:
             print(f"❌ 非同期処理タイムアウト/エラー: {e}")
 
-    # Firestoreに全部まとめて保存
+    # Firestoreに保存
     save_user_data(user_id, {
         "username": discord_username,
         "global_name": global_name,
@@ -315,10 +334,6 @@ def oauth_callback():
 class RuleVerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        # 動的にURLを変更するため、ボタンをコードから追加するか、
-        # あるいはインタラクション応答でURLを開くボタンを動的に返します。
-        # 今回はボタンを押されたら直接URL付きのビュー（またはDiscordのURLボタン）を返すか、
-        # あらかじめリンクボタンを動的に生成する方式にします。
 
     @discord.ui.button(label="認証を行う", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
     async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -326,7 +341,6 @@ class RuleVerifyView(discord.ui.View):
         base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
         verify_url = f"{base_url}/verify/{user_id}"
         
-        # リンクを開くためのボタンを持つViewをエフェメラルで送信する
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="🔗 認証ページを開く", style=discord.ButtonStyle.link, url=verify_url))
 
@@ -335,6 +349,7 @@ class RuleVerifyView(discord.ui.View):
             view=view,
             ephemeral=True
         )
+
 # --------------------------------------------------
 # Discord Bot クラス
 # --------------------------------------------------
