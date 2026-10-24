@@ -188,7 +188,7 @@ SUCCESS_TEMPLATE = """
 </html>
 """
 
-# ★ 14個の質問ページ（Q1:面白いか / Q2:ゲーム環境 / Q3:趣味・マイブーム を反映）
+# アンケートページテンプレート
 QUESTIONNAIRE_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
@@ -216,7 +216,7 @@ QUESTIONNAIRE_TEMPLATE = """
     <form action="/submit-answers/{{ user_id }}" method="POST">
       <!-- Q1: 自分は面白いと思いますか？ -->
       <div class="form-group">
-        <label>自分は面白いと思いますか？ </label>
+        <label>自分は面白いと思いますか？</label>
         <select name="q1_funny">
           <option value="はい">はい（我こそはムードメーカー！）</option>
           <option value="いいえ">いいえ（どちらかといえば一般人）</option>
@@ -243,7 +243,7 @@ QUESTIONNAIRE_TEMPLATE = """
       <!-- Q5: ニックネーム -->
       <div class="form-group">
         <label>サーバー内で呼ばれたい名前（ニックネーム）</label>
-        <input type="text" name="q5_nickname" placeholder="例: ぴくるす" required>
+        <input type="text" name="q5_nickname" placeholder="例: みかん" required>
       </div>
 
       <!-- Q6: 年齢層 -->
@@ -294,7 +294,7 @@ QUESTIONNAIRE_TEMPLATE = """
         <input type="text" name="q11_food" placeholder="例: ラーメン、りんご" required>
       </div>
 
-      <!-- : 運営・管理陣へメッセージや質問 -->
+      <!-- Q14: 運営・管理陣へメッセージや質問 -->
       <div class="form-group">
         <label>運営・管理陣へメッセージや質問</label>
         <input type="text" name="q14_message" placeholder="例: よろしくお願いします！" required>
@@ -485,25 +485,24 @@ def submit_answers(user_id):
         "q1_funny": request.form.get("q1_funny", ""),
         "q2_platform": request.form.get("q2_platform", ""),
         "q3_hobby": request.form.get("q3_hobby", ""),
-        "q4_email": request.form.get("q4_email", ""),
         "q5_nickname": request.form.get("q5_nickname", ""),
         "q6_age_group": request.form.get("q6_age_group", ""),
         "q7_favorite_genre": request.form.get("q7_favorite_genre", ""),
         "q8_play_time": request.form.get("q8_play_time", ""),
         "q9_vc": request.form.get("q9_vc", ""),
-        "q10_gift_pref": request.form.get("q10_gift_pref", ""),
         "q11_food": request.form.get("q11_food", ""),
-        "q12_source": request.form.get("q12_source", ""),
-        "q13_goal": request.form.get("q13_goal", ""),
         "q14_message": request.form.get("q14_message", "")
     }
 
     oauth_data = session.get('oauth_data', {})
+    
+    # ★ Discord OAuth2で取得したメールアドレスを確実に取り出す
+    user_email = oauth_data.get("discord_oauth_email", "未取得")
 
     # Q1, Q2, Q3の回答から付与するロールを自動判定
     roles_to_add = []
     
-    # Q1: 面白い人判定
+    # Q1: 面面白い人判定
     if answers["q1_funny"] == "はい" and ROLE_IDS["面白い人"] != 0:
         roles_to_add.append(ROLE_IDS["面白い人"])
 
@@ -546,10 +545,10 @@ def submit_answers(user_id):
         except Exception as e:
             print(f"❌ ロール付与非同期エラー: {e}")
 
-    # Firestoreに保存
+    # Firestoreに保存（メールアドレスを `email` として確実に格納）
     save_user_data(user_id, {
         **oauth_data,
-        "email": answers["q4_email"],
+        "email": user_email,
         "answers": answers,
         "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
