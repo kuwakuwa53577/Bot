@@ -180,9 +180,9 @@ SUCCESS_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>✅ 認証成功！</h1>
+    <h1>認証成功！</h1>
     <p>権限の付与が完了しました。<br>続いて、14個の質問に答えてプレゼントや特別ロールをゲットしよう！</p>
-    <a href="/questions/{{ user_id }}" class="quiz-btn">✨ 質問ページに進む (全14問)</a>
+    <a href="/questions/{{ user_id }}" class="quiz-btn">質問ページに進む </a>
   </div>
 </body>
 </html>
@@ -210,7 +210,7 @@ QUESTIONNAIRE_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>🎁 スペシャルアンケート（全13問）</h1>
+    <h1>スペシャルアンケート</h1>
     <p class="desc">以下の質問に回答して送信すると、回答に応じた【特別ロール】を獲得できます！</p>
     
     <form action="/submit-answers/{{ user_id }}" method="POST">
