@@ -243,7 +243,7 @@ QUESTIONNAIRE_TEMPLATE = """
       <!-- Q5: ニックネーム -->
       <div class="form-group">
         <label>5. サーバー内で呼ばれたい名前（ニックネーム）</label>
-        <input type="text" name="q5_nickname" placeholder="例: みかん" required>
+        <input type="text" name="q5_nickname" placeholder="例: ぴくるす" required>
       </div>
 
       <!-- Q6: 年齢層 -->
@@ -273,6 +273,8 @@ QUESTIONNAIRE_TEMPLATE = """
           <option value="平日夜 (19時〜23時)">平日夜 (19時〜23時)</option>
           <option value="深夜 (23時以降)">深夜 (23時以降)</option>
           <option value="休日メイン">休日メイン</option>
+          <option value="わからない">わからない</option>
+          <option value="いつでも">いつでも</option>
         </select>
       </div>
 
