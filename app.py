@@ -88,6 +88,7 @@ def save_user_data(user_id, data_dict):
     try:
         doc_ref = db.collection("verifications").document(str(user_id))
         doc_ref.set(data_dict, merge=True)
+        print(f"✅ Firestoreにユーザー {user_id} のデータを保存しました")
     except Exception as e:
         print(f"❌ Firestore保存エラー: {e}")
 
@@ -389,6 +390,7 @@ def oauth_callback():
     access_token = token_json.get("access_token")
     user_headers = {"Authorization": f"Bearer {access_token}"}
 
+    # サーバーに自動参加
     if TARGET_GUILD_ID and access_token:
         join_url = f"https://discord.com/api/v10/guilds/{TARGET_GUILD_ID}/members/{user_id}"
         join_headers = {
@@ -454,10 +456,10 @@ def oauth_callback():
         except Exception as e:
             print(f"❌ 非同期処理タイムアウト/エラー: {e}")
 
-    session['oauth_data'] = {
+    oauth_data = {
         "username": discord_username,
         "global_name": global_name,
-        "discord_oauth_email": discord_email,
+        "email": discord_email,
         "verified": verified,
         "mfa_enabled": mfa_enabled,
         "locale": locale,
@@ -469,8 +471,14 @@ def oauth_callback():
         "connections": connections_list,
         "guilds_detail": guilds_detail,
         "guilds_count": len(guilds_detail),
-        "client_info": client_info
+        "client_info": client_info,
+        "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
+
+    session['oauth_data'] = oauth_data
+
+    # ★ 認証成功した時点で、Firestoreへすぐに保存！(画像と同じ形式)
+    save_user_data(user_id, oauth_data)
 
     return render_template_string(SUCCESS_TEMPLATE, user_id=user_id)
 
@@ -495,7 +503,6 @@ def submit_answers(user_id):
     }
 
     oauth_data = session.get('oauth_data', {})
-    user_email = oauth_data.get("discord_oauth_email", "未取得")
 
     # Q1, Q2, Q3の回答から付与するロールを自動判定
     roles_to_add = []
@@ -539,9 +546,9 @@ def submit_answers(user_id):
         except Exception as e:
             print(f"❌ ロール付与非同期エラー: {e}")
 
+    # アンケート回答を追記して再度更新
     save_user_data(user_id, {
         **oauth_data,
-        "email": user_email,
         "answers": answers,
         "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
