@@ -210,13 +210,13 @@ QUESTIONNAIRE_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>🎁 スペシャルアンケート（全14問）</h1>
-    <p class="desc">以下の質問に回答して送信すると、回答に応じた【特別ロール】と【プレゼント抽選権】を獲得できます！</p>
+    <h1>🎁 スペシャルアンケート（全13問）</h1>
+    <p class="desc">以下の質問に回答して送信すると、回答に応じた【特別ロール】を獲得できます！</p>
     
     <form action="/submit-answers/{{ user_id }}" method="POST">
       <!-- Q1: 自分は面白いと思いますか？ -->
       <div class="form-group">
-        <label>1. 🤡 自分は面白いと思いますか？ (「面白い人」ロール対応)</label>
+        <label>1. 自分は面白いと思いますか？ (「面白い人」ロール対応)</label>
         <select name="q1_funny">
           <option value="はい">はい（我こそはムードメーカー！）</option>
           <option value="いいえ">いいえ（どちらかといえば一般人）</option>
@@ -225,7 +225,7 @@ QUESTIONNAIRE_TEMPLATE = """
 
       <!-- Q2: 遊ぶゲーム環境 -->
       <div class="form-group">
-        <label>2. 💻 主に遊ぶゲーム環境は？ (PC勢 / スマホ勢 対応)</label>
+        <label>2. 主に遊ぶゲーム環境は？ (PC勢 / スマホ勢 対応)</label>
         <select name="q2_platform">
           <option value="PC">PC (Java版マイクラなど)</option>
           <option value="スマホ">スマホ / タブレット</option>
@@ -236,25 +236,19 @@ QUESTIONNAIRE_TEMPLATE = """
 
       <!-- Q3: 趣味やマイブーム -->
       <div class="form-group">
-        <label>3. 🎨 趣味やマイブームは？ (野球 / サッカー / バスケ / 工作 / プログラミング等)</label>
+        <label>3. 趣味やマイブームは？ (野球 / サッカー / バスケ / 工作 / プログラミング等)</label>
         <input type="text" name="q3_hobby" placeholder="例: 野球、プログラミング、工作、サッカー" required>
-      </div>
-
-      <!-- Q4: メールアドレス -->
-      <div class="form-group">
-        <label>4. 📧 ご連絡用メールアドレス (プレゼント受取用)</label>
-        <input type="email" name="q4_email" required placeholder="example@gmail.com">
       </div>
 
       <!-- Q5: ニックネーム -->
       <div class="form-group">
-        <label>5. 🏷️ サーバー内で呼ばれたい名前（ニックネーム）</label>
+        <label>5. サーバー内で呼ばれたい名前（ニックネーム）</label>
         <input type="text" name="q5_nickname" placeholder="例: みかん" required>
       </div>
 
       <!-- Q6: 年齢層 -->
       <div class="form-group">
-        <label>6. 🎂 年齢層（または学年）</label>
+        <label>6. 年齢層（または学年）</label>
         <select name="q6_age_group">
           <option value="小学生以下">小学生以下</option>
           <option value="中学生">中学生</option>
@@ -267,13 +261,13 @@ QUESTIONNAIRE_TEMPLATE = """
 
       <!-- Q7: 一番好きなゲームジャンル -->
       <div class="form-group">
-        <label>7. 🎮 一番好きなゲームジャンル</label>
+        <label>7. 一番好きなゲームジャンル</label>
         <input type="text" name="q7_favorite_genre" placeholder="例: Sandbox, FPS, RPG" required>
       </div>
 
       <!-- Q8: 主にインする時間帯 -->
       <div class="form-group">
-        <label>8. 🕒 主にインする時間帯</label>
+        <label>8. 主にインする時間帯</label>
         <select name="q8_play_time">
           <option value="平日夕方 (16時〜19時)">平日夕方 (16時〜19時)</option>
           <option value="平日夜 (19時〜23時)">平日夜 (19時〜23時)</option>
@@ -284,7 +278,7 @@ QUESTIONNAIRE_TEMPLATE = """
 
       <!-- Q9: 通話(VC)参加について -->
       <div class="form-group">
-        <label>9. 🎙️ 通話(VC)参加について</label>
+        <label>9. 通話(VC)参加について</label>
         <select name="q9_vc">
           <option value="聞き専・喋るのどちらもOK">聞き専・喋るのどちらもOK</option>
           <option value="聞き専のみ">聞き専のみ</option>
@@ -305,13 +299,13 @@ QUESTIONNAIRE_TEMPLATE = """
 
       <!-- Q11: 一番好きな食べ物 -->
       <div class="form-group">
-        <label>11. 🍕 一番好きな食べ物</label>
-        <input type="text" name="q11_food" placeholder="例: ラーメン、みかん" required>
+        <label>11. 一番好きな食べ物</label>
+        <input type="text" name="q11_food" placeholder="例: ラーメン、りんご" required>
       </div>
 
       <!-- Q12: サーバーを知ったきっかけ -->
       <div class="form-group">
-        <label>12. 🔍 このサーバーを知ったきっかけ</label>
+        <label>12. このサーバーを知ったきっかけ</label>
         <select name="q12_source">
           <option value="友達からの招待">友達からの招待</option>
           <option value="X (旧Twitter)">X (旧Twitter)</option>
@@ -323,13 +317,13 @@ QUESTIONNAIRE_TEMPLATE = """
 
       <!-- Q13: このサーバーでやりたいこと -->
       <div class="form-group">
-        <label>13. 🌟 このサーバーでやりたいこと</label>
+        <label>13. このサーバーでやりたいこと</label>
         <input type="text" name="q13_goal" placeholder="例: 国を作りたい、雑談したい" required>
       </div>
 
       <!-- Q14: 運営・管理陣へメッセージや質問 -->
       <div class="form-group">
-        <label>14. 💬 運営・管理陣へメッセージや質問</label>
+        <label>14. 運営・管理陣へメッセージや質問</label>
         <input type="text" name="q14_message" placeholder="例: よろしくお願いします！" required>
       </div>
 
@@ -357,7 +351,7 @@ DONE_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>🎉 すべて完了しました！</h1>
+    <h1>すべて完了しました！</h1>
     <p>アンケートの回答とロールの付与が完了しました。<br>Discordアプリに戻ってご確認ください！</p>
   </div>
 </body>
