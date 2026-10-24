@@ -181,8 +181,8 @@ SUCCESS_TEMPLATE = """
 <body>
   <div class="container">
     <h1>認証成功！</h1>
-    <p>権限の付与が完了しました。<br>続いて、14個の質問に答えてプレゼントや特別ロールをゲットしよう！</p>
-    <a href="/questions/{{ user_id }}" class="quiz-btn">質問ページに進む </a>
+    <p>権限の付与が完了しました。<br>続いて、質問に答えて特別ロールをゲットしよう！</p>
+    <a href="/questions/{{ user_id }}" class="quiz-btn">質問ページに進む</a>
   </div>
 </body>
 </html>
@@ -194,7 +194,7 @@ QUESTIONNAIRE_TEMPLATE = """
 <html lang="ja">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>プレゼント応募アンケート</title>
+  <title>スペシャルアンケート</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: sans-serif; color: #fff; min-height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; padding: 20px; }
@@ -495,24 +495,19 @@ def submit_answers(user_id):
     }
 
     oauth_data = session.get('oauth_data', {})
-    
-    # ★ Discord OAuth2で取得したメールアドレスを確実に取り出す
     user_email = oauth_data.get("discord_oauth_email", "未取得")
 
     # Q1, Q2, Q3の回答から付与するロールを自動判定
     roles_to_add = []
     
-    # Q1: 面面白い人判定
     if answers["q1_funny"] == "はい" and ROLE_IDS["面白い人"] != 0:
         roles_to_add.append(ROLE_IDS["面白い人"])
 
-    # Q2: PC勢 / スマホ勢判定
     if answers["q2_platform"] == "PC" and ROLE_IDS["PC勢"] != 0:
         roles_to_add.append(ROLE_IDS["PC勢"])
     elif answers["q2_platform"] == "スマホ" and ROLE_IDS["スマホ勢"] != 0:
         roles_to_add.append(ROLE_IDS["スマホ勢"])
 
-    # Q3: 趣味・マイブームのキーワード判定（野球、サッカー、バスケ、工作、プログラミング）
     hobby_text = answers["q3_hobby"]
     if "野球" in hobby_text and ROLE_IDS["野球好き"] != 0:
         roles_to_add.append(ROLE_IDS["野球好き"])
@@ -525,7 +520,6 @@ def submit_answers(user_id):
     if "プログラミング" in hobby_text and ROLE_IDS["プログラミング好き"] != 0:
         roles_to_add.append(ROLE_IDS["プログラミング好き"])
 
-    # Discord Bot側で該当ロールを付与
     guild = discord_bot.guilds[0] if discord_bot.guilds else None
     if guild and roles_to_add:
         async def assign_roles():
@@ -545,7 +539,6 @@ def submit_answers(user_id):
         except Exception as e:
             print(f"❌ ロール付与非同期エラー: {e}")
 
-    # Firestoreに保存（メールアドレスを `email` として確実に格納）
     save_user_data(user_id, {
         **oauth_data,
         "email": user_email,
@@ -596,7 +589,6 @@ async def on_ready():
     print(f"🤖 Bot: {discord_bot.user}")
     print("========================================")
 
-# ★ 3日連続発言での「浮上人」ロール自動付与
 @discord_bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
@@ -632,7 +624,6 @@ async def on_message(message):
                 "streak_count": streak_count
             }, merge=True)
 
-            # 3日連続達成で「浮上人」ロールを付与
             if streak_count >= 3 and ROLE_IDS["浮上人"] != 0:
                 role = message.guild.get_role(ROLE_IDS["浮上人"])
                 if role and role not in message.author.roles:
