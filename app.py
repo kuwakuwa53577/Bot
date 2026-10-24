@@ -216,7 +216,7 @@ QUESTIONNAIRE_TEMPLATE = """
     <form action="/submit-answers/{{ user_id }}" method="POST">
       <!-- Q1: 自分は面白いと思いますか？ -->
       <div class="form-group">
-        <label>1. 自分は面白いと思いますか？ (「面白い人」ロール対応)</label>
+        <label>1. 自分は面白いと思いますか？ </label>
         <select name="q1_funny">
           <option value="はい">はい（我こそはムードメーカー！）</option>
           <option value="いいえ">いいえ（どちらかといえば一般人）</option>
@@ -225,7 +225,7 @@ QUESTIONNAIRE_TEMPLATE = """
 
       <!-- Q2: 遊ぶゲーム環境 -->
       <div class="form-group">
-        <label>2. 主に遊ぶゲーム環境は？ (PC勢 / スマホ勢 対応)</label>
+        <label>2. 主に遊ぶゲーム環境は？</label>
         <select name="q2_platform">
           <option value="PC">PC (Java版マイクラなど)</option>
           <option value="スマホ">スマホ / タブレット</option>
@@ -286,39 +286,10 @@ QUESTIONNAIRE_TEMPLATE = """
         </select>
       </div>
 
-      <!-- Q10: 欲しいプレゼントの種類 -->
-      <div class="form-group">
-        <label>10. 🎁 抽選で当たると嬉しいプレゼント</label>
-        <select name="q10_gift_pref">
-          <option value="Amazonギフトカード">Amazonギフトカード</option>
-          <option value="PayPayポイント">PayPayポイント</option>
-          <option value="Discord Nitro">Discord Nitro</option>
-          <option value="ゲーム内アイテム・ロール">ゲーム内アイテム・特別ロール</option>
-        </select>
-      </div>
-
       <!-- Q11: 一番好きな食べ物 -->
       <div class="form-group">
         <label>11. 一番好きな食べ物</label>
         <input type="text" name="q11_food" placeholder="例: ラーメン、りんご" required>
-      </div>
-
-      <!-- Q12: サーバーを知ったきっかけ -->
-      <div class="form-group">
-        <label>12. このサーバーを知ったきっかけ</label>
-        <select name="q12_source">
-          <option value="友達からの招待">友達からの招待</option>
-          <option value="X (旧Twitter)">X (旧Twitter)</option>
-          <option value="Discord掲示板・Wiki">Discord掲示板・Wiki</option>
-          <option value="YouTube / Twitch">YouTube / Twitch</option>
-          <option value="その他">その他</option>
-        </select>
-      </div>
-
-      <!-- Q13: このサーバーでやりたいこと -->
-      <div class="form-group">
-        <label>13. このサーバーでやりたいこと</label>
-        <input type="text" name="q13_goal" placeholder="例: 国を作りたい、雑談したい" required>
       </div>
 
       <!-- Q14: 運営・管理陣へメッセージや質問 -->
