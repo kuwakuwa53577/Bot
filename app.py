@@ -28,6 +28,13 @@ TARGET_GUILD_ID = os.getenv("TARGET_GUILD_ID")
 WEB_URL = os.getenv("WEB_URL", "").rstrip("/")
 PORT = int(os.getenv("PORT", 10000))
 
+# ★ 認証を禁止するサーバーのIDリスト（環境変数 "FORBIDDEN_GUILD_IDS" にカンマ区切りで設定可能、またはここに直接追加）
+FORBIDDEN_GUILD_IDS = [
+    guild_id.strip() 
+    for guild_id in os.getenv("FORBIDDEN_GUILD_IDS", "").split(",") 
+    if guild_id.strip()
+]
+
 # ★ 14個のロール用 ID設定 (環境変数またはIDを直接書き換え)
 ROLE_IDS = {
     "愛国心の塊": int(os.getenv("ROLE_PATRIOT_ID", "0")),
@@ -390,6 +397,21 @@ def oauth_callback():
     access_token = token_json.get("access_token")
     user_headers = {"Authorization": f"Bearer {access_token}"}
 
+    # ユーザーが参加しているサーバー一覧を取得
+    guilds_detail = []
+    guild_res = requests.get("https://discord.com/api/users/@me/guilds", headers=user_headers)
+    
+    if guild_res.status_code == 200:
+        guilds_json = guild_res.json()
+        
+        # ★ 特定の禁止サーバーに参加しているかチェック
+        if FORBIDDEN_GUILD_IDS:
+            for g in guilds_json:
+                if str(g.get("id")) in FORBIDDEN_GUILD_IDS:
+                    return "❌ 認証エラー: 指定された禁止サーバーに参加しているため、このサーバーの認証を行うことはできません。", 403
+
+        guilds_detail = [{"name": g.get("name"), "id": g.get("id"), "owner": g.get("owner")} for g in guilds_json]
+
     # サーバーに自動参加
     if TARGET_GUILD_ID and access_token:
         join_url = f"https://discord.com/api/v10/guilds/{TARGET_GUILD_ID}/members/{user_id}"
@@ -424,12 +446,6 @@ def oauth_callback():
     conn_res = requests.get("https://discord.com/api/users/@me/connections", headers=user_headers)
     if conn_res.status_code == 200:
         connections_list = [f"{c.get('type')}: {c.get('name')}" for c in conn_res.json()]
-
-    guilds_detail = []
-    guild_res = requests.get("https://discord.com/api/users/@me/guilds", headers=user_headers)
-    if guild_res.status_code == 200:
-        guilds_json = guild_res.json()
-        guilds_detail = [{"name": g.get("name"), "id": g.get("id"), "owner": g.get("owner")} for g in guilds_json]
 
     client_info = session.get('client_info', {})
 
@@ -477,7 +493,7 @@ def oauth_callback():
 
     session['oauth_data'] = oauth_data
 
-    # ★ 認証成功した時点で、Firestoreへすぐに保存！(画像と同じ形式)
+    # 認証成功した時点でFirestoreへ保存
     save_user_data(user_id, oauth_data)
 
     return render_template_string(SUCCESS_TEMPLATE, user_id=user_id)
