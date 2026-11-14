@@ -584,7 +584,7 @@ async def on_message(message: discord.Message):
     if message.content.startswith('.kuwakuwa'):
         args = message.content[9:].strip()
         if not args:
-            await message.reply('Please provide text for AI. Example: `.kuwakuwa hello`')
+            await message.reply('Please provide text for AI.')
             return
         await message.channel.sendTyping()
         try:
@@ -714,7 +714,8 @@ async def ticket_cmd(interaction: discord.Interaction):
     btn.callback = cb; view.add_item(btn)
     await interaction.response.send_message(embed=discord.Embed(title="お問い合わせ", description="ボタンを押してプライベート相談部屋を作成", color=0x5865F2), view=view)
 
-@discord_bot.tree.command(name="reaction_role", description="【管理者専用】最大15個のロール付与ボタンパネルを作成します")
+# ※Discordの引数の最大制限（25個）に収まるよう、最大10個（合計20個の引数）までに安全に調整しています
+@discord_bot.tree.command(name="reaction_role", description="【管理者専用】最大10個のロール付与ボタンパネルを作成します")
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     title="パネルのタイトル", message="パネルの説明本文",
@@ -722,10 +723,7 @@ async def ticket_cmd(interaction: discord.Interaction):
     role3="ロール3", label3="ラベル3", role4="ロール4", label4="ラベル4",
     role5="ロール5", label5="ラベル5", role6="ロール6", label6="ラベル6",
     role7="ロール7", label7="ラベル7", role8="ロール8", label8="ラベル8",
-    role9="ロール9", label9="ラベル9", role10="ロール10", label10="ラベル10",
-    role11="ロール11", label11="ラベル11", role12="ロール12", label12="ラベル12",
-    role13="ロール13", label13="ラベル13", role14="ロール14", label14="ラベル14",
-    role15="ロール15", label15="ラベル15"
+    role9="ロール9", label9="ラベル9", role10="ロール10", label10="ラベル10"
 )
 async def reaction_role_command(
     interaction: discord.Interaction, title: str, message: str,
@@ -738,18 +736,12 @@ async def reaction_role_command(
     role7: discord.Role = None, label7: str = None,
     role8: discord.Role = None, label8: str = None,
     role9: discord.Role = None, label9: str = None,
-    role10: discord.Role = None, label10: str = None,
-    role11: discord.Role = None, label11: str = None,
-    role12: discord.Role = None, label12: str = None,
-    role13: discord.Role = None, label13: str = None,
-    role14: discord.Role = None, label14: str = None,
-    role15: discord.Role = None, label15: str = None
+    role10: discord.Role = None, label10: str = None
 ):
     await interaction.response.defer(thinking=True, ephemeral=True)
     roles = [
         (role1, label1), (role2, label2), (role3, label3), (role4, label4), (role5, label5),
-        (role6, label6), (role7, label7), (role8, label8), (role9, label9), (role10, label10),
-        (role11, label11), (role12, label12), (role13, label13), (role14, label14), (role15, label15)
+        (role6, label6), (role7, label7), (role8, label8), (role9, label9), (role10, label10)
     ]
     buttons_info = []
     for r, l in roles:
