@@ -5,3 +5,4 @@ requests
 feedparser
 aiohttp
 PyNaCl
+google-genai
