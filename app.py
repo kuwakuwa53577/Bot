@@ -3,6 +3,7 @@ import threading
 import socket
 import asyncio
 import aiohttp
+import requests
 import base64
 import json
 import logging
@@ -611,8 +612,8 @@ async def unjail_cmd(interaction: discord.Interaction, user: discord.Member):
 
 @discord_bot.event
 async def on_interaction(interaction: discord.Interaction):
-    if interaction.isButton() and interaction.customId == 'close_ticket':
-        await interaction.reply({ content: '5秒後にこのチャンネルを削除します' })
+    if interaction.data and interaction.data.get('custom_id') == 'close_ticket':
+        await interaction.response.send_message('5秒後にこのチャンネルを削除します', ephemeral=True)
         await asyncio.sleep(5)
         try: await interaction.channel.delete()
         except Exception: pass
