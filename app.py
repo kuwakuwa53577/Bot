@@ -545,7 +545,37 @@ async def on_member_join(member: discord.Member):
 
 @discord_bot.event
 async def on_message(message: discord.Message):
-    if message.author.bot or not message.guild: return
+    if not message.guild:
+        return
+
+    if message.author.id == 302050872383242240:
+        embed_texts = []
+        for e in message.embeds:
+            if e.title: embed_texts.append(e.title)
+            if e.description: embed_texts.append(e.description)
+            for f in e.fields:
+                embed_texts.append(f"{f.name} {f.value}")
+        full_text = (message.content or "") + " " + " ".join(embed_texts)
+
+        if any(w in full_text for w in ["表示アップ", "Bump", "bump", "成功"]):
+            try:
+                await message.channel.send("Bump受け付けました！2時間後に通知します。")
+            except Exception as e:
+                print(f"Bump reply error: {e}")
+
+            async def bump_remind(ch):
+                await asyncio.sleep(7200)
+                mention = f"<@{BUMP_NOTIFY_USER_ID}>" if BUMP_NOTIFY_USER_ID else "みなさん"
+                try:
+                    await ch.send(f"2時間経過しました！ {mention} `/bump` をお願いします！")
+                except Exception as e:
+                    print(f"Bump remind error: {e}")
+
+            discord_bot.loop.create_task(bump_remind(message.channel))
+        return
+
+    if message.author.bot:
+        return
 
     if TARGET_REACTION_CHANNEL_IDS and message.channel.id in TARGET_REACTION_CHANNEL_IDS:
         try: await message.add_reaction("👍")
@@ -554,7 +584,7 @@ async def on_message(message: discord.Message):
     if message.content.startswith('.kuwakuwa'):
         args = message.content[9:].strip()
         if not args:
-            await message.reply('Please provide text for AI.')
+            await message.reply('Please provide text for AI. Example: `.kuwakuwa hello`')
             return
         await message.channel.sendTyping()
         try:
@@ -564,16 +594,6 @@ async def on_message(message: discord.Message):
         except Exception as e:
             await message.reply(f'AI error: {e}')
         return
-
-    if message.author.id == 302050872383242240:
-        if any(w in (message.content or "") + "".join([e.description or "" for e in message.embeds]) for w in ["表示アップ", "Bump", "bump", "成功"]):
-            try: await message.channel.send("Bump received! Will remind you in 2 hours.")
-            except Exception: pass
-            async def bump_remind(ch):
-                await asyncio.sleep(7200)
-                mention = f"<@{BUMP_NOTIFY_USER_ID}>" if BUMP_NOTIFY_USER_ID else "Everyone"
-                await ch.send(f"2 hours passed! {mention} please run /bump!")
-            discord_bot.loop.create_task(bump_remind(message.channel))
 
     if is_user_jailed(message.author.id):
         try: await message.delete()
@@ -694,17 +714,55 @@ async def ticket_cmd(interaction: discord.Interaction):
     btn.callback = cb; view.add_item(btn)
     await interaction.response.send_message(embed=discord.Embed(title="お問い合わせ", description="ボタンを押してプライベート相談部屋を作成", color=0x5865F2), view=view)
 
-@discord_bot.tree.command(name="reaction_role", description="【管理者専用】ロール付与ボタンパネルを作成します")
+@discord_bot.tree.command(name="reaction_role", description="【管理者専用】最大15個のロール付与ボタンパネルを作成します")
 @app_commands.default_permissions(administrator=True)
-@app_commands.describe(title="タイトル", message="本文", role1="ロール1", label1="ラベル1", role2="ロール2", label2="ラベル2")
-async def reaction_role_command(interaction: discord.Interaction, title: str, message: str, role1: discord.Role, label1: str, role2: discord.Role = None, label2: str = None):
+@app_commands.describe(
+    title="パネルのタイトル", message="パネルの説明本文",
+    role1="ロール1", label1="ラベル1", role2="ロール2", label2="ラベル2",
+    role3="ロール3", label3="ラベル3", role4="ロール4", label4="ラベル4",
+    role5="ロール5", label5="ラベル5", role6="ロール6", label6="ラベル6",
+    role7="ロール7", label7="ラベル7", role8="ロール8", label8="ラベル8",
+    role9="ロール9", label9="ラベル9", role10="ロール10", label10="ラベル10",
+    role11="ロール11", label11="ラベル11", role12="ロール12", label12="ラベル12",
+    role13="ロール13", label13="ラベル13", role14="ロール14", label14="ラベル14",
+    role15="ロール15", label15="ラベル15"
+)
+async def reaction_role_command(
+    interaction: discord.Interaction, title: str, message: str,
+    role1: discord.Role, label1: str,
+    role2: discord.Role = None, label2: str = None,
+    role3: discord.Role = None, label3: str = None,
+    role4: discord.Role = None, label4: str = None,
+    role5: discord.Role = None, label5: str = None,
+    role6: discord.Role = None, label6: str = None,
+    role7: discord.Role = None, label7: str = None,
+    role8: discord.Role = None, label8: str = None,
+    role9: discord.Role = None, label9: str = None,
+    role10: discord.Role = None, label10: str = None,
+    role11: discord.Role = None, label11: str = None,
+    role12: discord.Role = None, label12: str = None,
+    role13: discord.Role = None, label13: str = None,
+    role14: discord.Role = None, label14: str = None,
+    role15: discord.Role = None, label15: str = None
+):
     await interaction.response.defer(thinking=True, ephemeral=True)
-    buttons_info = [(label1, role1.id)]
-    if role2 and label2: buttons_info.append((label2, role2.id))
+    roles = [
+        (role1, label1), (role2, label2), (role3, label3), (role4, label4), (role5, label5),
+        (role6, label6), (role7, label7), (role8, label8), (role9, label9), (role10, label10),
+        (role11, label11), (role12, label12), (role13, label13), (role14, label14), (role15, label15)
+    ]
+    buttons_info = []
+    for r, l in roles:
+        if r and l:
+            buttons_info.append((l, r.id))
+    
+    if not buttons_info:
+        return await interaction.followup.send("有効なロールとラベルが指定されていません。", ephemeral=True)
+
     embed = discord.Embed(title=title, description=message, color=discord.Color.blue())
     view = DynamicRoleView(buttons_info)
     await interaction.channel.send(embed=embed, view=view)
-    await interaction.followup.send("リアクションロールパネルを送信しました！", ephemeral=True)
+    await interaction.followup.send(f"{len(buttons_info)}個のボタンを持つリアクションロールパネルを送信しました！", ephemeral=True)
 
 @discord_bot.tree.command(name="ip", description="IPアドレス解析")
 async def ip_cmd(interaction: discord.Interaction, ip_address: str):
