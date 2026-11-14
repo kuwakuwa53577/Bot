@@ -6,3 +6,4 @@ feedparser
 aiohttp
 PyNaCl
 google-genai
+APScheduler
