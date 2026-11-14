@@ -1,41 +1,64 @@
-import asyncio
-import json
 import os
+import threading
+import socket
+import asyncio
+import aiohttp
+import base64
+import json
+import logging
 import datetime
-from threading import Thread
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from flask import Flask, render_template_string, request, jsonify, redirect, session
-import requests
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-import logging
+from google.genai import GoogleGenAI
+ai = GoogleGenAI(api_key=os.getenv("GEMINI_API_KEY"))
 
-# ログ設定
 logging.basicConfig(level=logging.INFO)
 
-# --------------------------------------------------
-# 設定 & 環境変数
-# --------------------------------------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
 PROXY_URL = os.getenv("PROXY_URL")
-MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
-TARGET_GUILD_ID = os.getenv("TARGET_GUILD_ID")
-WEB_URL = os.getenv("WEB_URL", "").rstrip("/")
 PORT = int(os.getenv("PORT", 10000))
+WEB_URL = os.getenv("WEB_URL", "").rstrip("/")
 
-# ★ 認証を禁止するサーバーのIDリスト（環境変数 "FORBIDDEN_GUILD_IDS" にカンマ区切りで設定可能、またはここに直接追加）
-FORBIDDEN_GUILD_IDS = [
-    guild_id.strip() 
-    for guild_id in os.getenv("FORBIDDEN_GUILD_IDS", "").split(",") 
-    if guild_id.strip()
-]
+CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+TARGET_GUILD_ID = os.getenv("TARGET_GUILD_ID")
+REDIRECT_URI = f"{WEB_URL}/oauth/callback" if WEB_URL else f"http://localhost:{PORT}/oauth/callback"
 
-# ★ 14個のロール用 ID設定 (環境変数またはIDを直接書き換え)
+MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
+ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
+SUMMARY_CHANNEL_ID = int(os.getenv("SUMMARY_CHANNEL_ID", "0"))
+EXECUTION_CHANNEL_ID = int(os.getenv("EXECUTION_CHANNEL_ID", "0"))
+JAIL_ROLE_ID = int(os.getenv("JAIL_ROLE_ID", "0"))
+WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID", "0"))
+CREATOR_CHANNEL_ID = int(os.getenv("CREATOR_VOICE_CHANNEL_ID", "0"))
+CATEGORY_ID = os.getenv("CATEGORY_ID", "0")
+CATEGORY_ID = int(CATEGORY_ID) if CATEGORY_ID.isdigit() and CATEGORY_ID != "0" else None
+
+BUMP_CHANNEL_ID = int(os.getenv("BUMP_CHANNEL_ID", "0"))
+BUMP_NOTIFY_USER_ID = int(os.getenv("BUMP_NOTIFY_USER_ID", "0"))
+
+raw_reaction_channels = os.getenv("TARGET_REACTION_CHANNEL_IDS", "")
+TARGET_REACTION_CHANNEL_IDS = []
+for ch_id in raw_reaction_channels.split(","):
+    ch_id = ch_id.strip()
+    if ch_id.isdigit():
+        TARGET_REACTION_CHANNEL_IDS.append(int(ch_id))
+
+auth_env = os.getenv("AUTHORIZED_USER_IDS", "")
+if auth_env:
+    AUTHORIZED_USER_IDS = {int(uid.strip()) for uid in auth_env.split(",") if uid.strip().isdigit()}
+else:
+    AUTHORIZED_USER_IDS = set()
+
 ROLE_IDS = {
     "愛国心の塊": int(os.getenv("ROLE_PATRIOT_ID", "0")),
     "野球好き": int(os.getenv("ROLE_BASEBALL_ID", "0")),
@@ -47,21 +70,27 @@ ROLE_IDS = {
     "自由人": int(os.getenv("ROLE_FREEDOM_ID", "0")),
     "ゲームの天才": int(os.getenv("ROLE_GAME_GENIUS_ID", "0")),
     "天才": int(os.getenv("ROLE_GENIUS_ID", "0")),
-    "浮上人": int(os.getenv("ROLE_ACTIVE_STREAK_ID", "0")), # 3日連続発言で自動付与
+    "浮上人": int(os.getenv("ROLE_ACTIVE_STREAK_ID", "0")),
     "面白い人": int(os.getenv("ROLE_FUNNY_ID", "0")),
     "PC勢": int(os.getenv("ROLE_PC_ID", "0")),
     "スマホ勢": int(os.getenv("ROLE_MOBILE_ID", "0"))
 }
 
-CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
-CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
-REDIRECT_URI = f"{WEB_URL}/oauth/callback" if WEB_URL else f"http://localhost:{PORT}/oauth/callback"
+BASE_COIN_PER_MINUTE = 2
+TITLE_BONUSES = {
+    '通話廃人': 3,
+    'ガチャ中毒': 1,
+    '大富豪': 5
+}
 
-# --------------------------------------------------
-# Firebase 初期化
-# --------------------------------------------------
+RAID_TIME_WINDOW = 10  
+RAID_JOIN_LIMIT = 5   
+recent_joins = []     
+is_raid_mode = False  
+message_spam_track = {}
+temporary_channels = set()
+
 firebase_creds_json = os.getenv("FIREBASE_CREDENTIALS")
-
 if firebase_creds_json:
     try:
         cred_dict = json.loads(firebase_creds_json)
@@ -69,432 +98,216 @@ if firebase_creds_json:
             cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
-        print("✅ Firebase Admin SDK の初期化に成功しました")
+        print("Firebase Admin SDK の初期化に成功しました")
     except Exception as e:
-        print(f"❌ Firebase 初期化エラー: {e}")
-elif os.path.exists("serviceAccountKey.json"):
-    cred = credentials.Certificate("serviceAccountKey.json")
-    firebase_admin.initialize_app(cred)
-    print("✅ ローカルファイルで Firebase の初期化に成功しました")
-else:
-    print("⚠️ 警告: FIREBASE_CREDENTIALS または serviceAccountKey.json が見つかりません。")
+        print(f"Firebase 初期化エラー: {e}")
 
+db = None
 try:
-    db = firestore.client()
+    if firebase_admin._apps:
+        db = firestore.client()
+        print("Firestoreクライアントの取得に成功しました")
 except Exception as e:
-    db = None
-    print(f"⚠️ Firestoreクライアントの取得に失敗しました: {e}")
+    print(f"Firestoreクライアントの取得に失敗しました: {e}")
 
-# --------------------------------------------------
-# Firestore データヘルパー
-# --------------------------------------------------
 def save_user_data(user_id, data_dict):
-    if not db:
-        print("⚠️ データベースが未接続のためデータを保存できません")
-        return
-    try:
-        doc_ref = db.collection("verifications").document(str(user_id))
-        doc_ref.set(data_dict, merge=True)
-        print(f"✅ Firestoreにユーザー {user_id} のデータを保存しました")
-    except Exception as e:
-        print(f"❌ Firestore保存エラー: {e}")
+    if not db: return
+    try: db.collection("verifications").document(str(user_id)).set(data_dict, merge=True)
+    except Exception as e: print(f"Firestore保存エラー: {e}")
 
 def load_all_data():
-    if not db:
-        print("⚠️ データベースが未接続のためデータを読み込めません")
-        return {}
+    if not db: return {}
     try:
         docs = db.collection("verifications").stream()
         return {doc.id: doc.to_dict() for doc in docs}
-    except Exception as e:
-        print(f"❌ Firestore読み込みエラー: {e}")
-        return {}
+    except Exception as e: return {}
 
-# --------------------------------------------------
-# Flask Webサーバー
-# --------------------------------------------------
+def getUserData(user_id):
+    str_id = str(user_id)
+    if not db:
+        return {"balance": 0, "lastDaily": 0, "multiplier": 1.0, "multiplierExpire": 0, "totalVoiceMinutes": 0, "totalGachaCount": 0, "totalSpentCoins": 0, "badges": ['新人メンバー'], "equippedBadge": '新人メンバー'}
+    try:
+        doc = db.collection("economy").document(str_id).get()
+        if doc.exists:
+            data = doc.to_dict()
+            if data.get("multiplierExpire", 0) > 0 and datetime.datetime.now().timestamp() * 1000 > data["multiplierExpire"]:
+                data["multiplier"] = 1.0
+                data["multiplierExpire"] = 0
+            return data
+    except Exception: pass
+    
+    default_data = {"balance": 0, "lastDaily": 0, "multiplier": 1.0, "multiplierExpire": 0, "totalVoiceMinutes": 0, "totalGachaCount": 0, "totalSpentCoins": 0, "badges": ['新人メンバー'], "equippedBadge": '新人メンバー'}
+    saveUserData(user_id, default_data)
+    return default_data
+
+def saveUserData(user_id, data_dict):
+    if not db: return
+    try: db.collection("economy").document(str(user_id)).set(data_dict, merge=True)
+    except Exception as e: print(f"経済データ保存エラー: {e}")
+
+def checkAndAwardBadges(userData):
+    newBadges = []
+    badges = userData.get("badges", [])
+    if userData.get("totalVoiceMinutes", 0) >= 600 and '通話廃人' not in badges:
+        badges.append('通話廃人'); newBadges.append('通話廃人')
+    if userData.get("totalGachaCount", 0) >= 50 and 'ガチャ中毒' not in badges:
+        badges.append('ガチャ中毒'); newBadges.append('ガチャ中毒')
+    if userData.get("balance", 0) >= 10000 and '大富豪' not in badges:
+        badges.append('大富豪'); newBadges.append('大富豪')
+    userData["badges"] = badges
+    return newBadges
+
+def get_user_ip_from_db(user_id: int) -> str:
+    if not db: return "データベース未接続"
+    try:
+        doc = db.collection("verifications").document(str(user_id)).get()
+        if doc.exists: return doc.to_dict().get("ip", "IP未記録")
+    except Exception: pass
+    return "IP取得失敗"
+
+def get_user_email_from_db(user_id: int) -> str:
+    if not db: return "データベース未接続"
+    try:
+        doc = db.collection("verifications").document(str(user_id)).get()
+        if doc.exists: return doc.to_dict().get("email", "メール未記録")
+    except Exception: pass
+    return "メール取得失敗"
+
+def is_user_jailed(user_id: int) -> bool:
+    if not db: return False
+    try: return db.collection("jail_list").document(str(user_id)).get().exists
+    except Exception: return False
+
+def is_authorized_or_admin(member: discord.Member) -> bool:
+    if not member: return False
+    if member.id in AUTHORIZED_USER_IDS or member.guild_permissions.administrator: return True
+    return False
+
+async def send_log(guild: discord.Guild, title: str, description: str, color=0x5865F2):
+    if LOG_CHANNEL_ID == 0: return
+    channel = guild.get_channel(LOG_CHANNEL_ID)
+    if channel:
+        try: await channel.send(embed=discord.Embed(title=title, description=description, color=color, timestamp=datetime.datetime.now()))
+        except Exception: pass
+
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "kuwakuwa_secret_key_change_this")
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "samon_secret_key")
 
-@app.route("/ping")
-def ping():
-    return "pong", 200
-
-# 認証前ページ
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
-<head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>認証</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; }
-    .container { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 40px; border-radius: 16px; text-align: center; width: 90%; max-width: 420px; }
-    h1 { font-size: 1.5rem; margin-bottom: 10px; }
-    p { color: #aaa; font-size: 0.9rem; margin-bottom: 25px; }
-    .verify-btn { width: 100%; padding: 14px; font-size: 1rem; color: #fff; background: #5865F2; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; transition: background 0.2s; }
-    .verify-btn:hover { background: #4752C4; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>認証</h1>
-    <p>認証を行ってください。</p>
-    <button id="verify-btn" class="verify-btn" onclick="startAuth()">Discordアカウントで認証する</button>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>認証</title></head>
+<body style="background:#111;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;">
+  <div style="background:rgba(255,255,255,0.05);padding:40px;border-radius:16px;text-align:center;">
+    <h1>サーバー認証</h1>
+    <p>下のボタンを押してDiscordアカウントで認証してください。</p>
+    <a href="/oauth/login/{{ user_id }}" style="background:#5865F2;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;margin-top:20px;">Discordで認証する</a>
   </div>
-  <script>
-    function startAuth() {
-      const clientInfo = {
-        screen_resolution: window.screen.width + "x" + window.screen.height,
-        color_depth: window.screen.colorDepth,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        language: navigator.language,
-        platform: navigator.platform,
-        hardware_concurrency: navigator.hardwareConcurrency || "不明"
-      };
-      
-      fetch("/save-client-info/{{ user_id }}", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(clientInfo)
-      }).then(() => {
-        window.location.href = "/oauth/login/{{ user_id }}";
-      }).catch(() => {
-        window.location.href = "/oauth/login/{{ user_id }}";
-      });
-    }
-  </script>
 </body>
 </html>
 """
 
-# 認証完了画面
 SUCCESS_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
-<head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>認証完了</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; }
-    .container { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 40px; border-radius: 16px; text-align: center; width: 90%; max-width: 440px; }
-    h1 { font-size: 1.5rem; color: #80ff80; margin-bottom: 15px; }
-    p { color: #ccc; font-size: 0.95rem; line-height: 1.5; margin-bottom: 25px; }
-    .quiz-btn { width: 100%; padding: 14px; font-size: 1rem; color: #fff; background: #5865F2; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; transition: background 0.2s; }
-    .quiz-btn:hover { background: #4752C4; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>認証成功！</h1>
-    <p>権限の付与が完了しました。<br>続いて、質問に答えて特別ロールをゲットしよう！</p>
-    <a href="/questions/{{ user_id }}" class="quiz-btn">質問ページに進む</a>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>認証成功</title></head>
+<body style="background:#111;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;">
+  <div style="background:rgba(255,255,255,0.05);padding:40px;border-radius:16px;text-align:center;">
+    <h1 style="color:#80ff80;">認証成功！</h1>
+    <p>基本権限の付与が完了しました。<br>続いて、アンケートに答えて特別ロールをゲットしよう！</p>
+    <a href="/questions/{{ user_id }}" style="background:#5865F2;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;margin-top:20px;">質問ページに進む</a>
   </div>
 </body>
 </html>
 """
 
-# アンケートページテンプレート
 QUESTIONNAIRE_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
-<head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>スペシャルアンケート</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; color: #fff; min-height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; padding: 20px; }
-    .container { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 30px; border-radius: 16px; width: 100%; max-width: 550px; }
-    h1 { font-size: 1.4rem; color: #80ff80; margin-bottom: 10px; text-align: center; }
-    p.desc { color: #ccc; font-size: 0.88rem; margin-bottom: 25px; text-align: center; line-height: 1.4; }
-    .form-group { margin-bottom: 18px; }
-    label { display: block; margin-bottom: 6px; font-size: 0.88rem; color: #ddd; font-weight: bold; }
-    input[type="text"], input[type="email"], select { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: #222; color: #fff; font-size: 0.95rem; }
-    .submit-btn { width: 100%; padding: 14px; font-size: 1rem; color: #fff; background: #5865F2; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 10px; transition: background 0.2s; }
-    .submit-btn:hover { background: #4752C4; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>スペシャルアンケート</h1>
-    <p class="desc">以下の質問に回答して送信すると、回答に応じた【特別ロール】を獲得できます！</p>
-    
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>アンケート</title></head>
+<body style="background:#111;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px;">
+  <div style="background:rgba(255,255,255,0.05);padding:30px;border-radius:16px;width:100%;max-width:500px;">
+    <h1 style="color:#80ff80;text-align:center;margin-bottom:15px;">スペシャルアンケート</h1>
     <form action="/submit-answers/{{ user_id }}" method="POST">
-      <!-- Q1: 自分は面白いと思いますか？ -->
-      <div class="form-group">
-        <label>自分は面白いと思いますか？</label>
-        <select name="q1_funny">
-          <option value="はい">はい（我こそはムードメーカー！）</option>
-          <option value="いいえ">いいえ（どちらかといえば一般人）</option>
-        </select>
+      <div style="margin-bottom:15px;"><label>自分は面白いと思いますか？</label>
+        <select name="q1_funny" style="width:100%;padding:8px;background:#222;color:#fff;border-radius:5px;"><option value="はい">はい</option><option value="いいえ">いいえ</option></select>
       </div>
-
-      <!-- Q2: 遊ぶゲーム環境 -->
-      <div class="form-group">
-        <label>主に遊ぶゲーム環境は？</label>
-        <select name="q2_platform">
-          <option value="PC">PC (Java版マイクラなど)</option>
-          <option value="スマホ">スマホ / タブレット</option>
-          <option value="コンシューマー">Switch / PS4 / PS5</option>
-          <option value="その他">その他</option>
-        </select>
+      <div style="margin-bottom:15px;"><label>主なゲーム環境は？</label>
+        <select name="q2_platform" style="width:100%;padding:8px;background:#222;color:#fff;border-radius:5px;"><option value="PC">PC</option><option value="スマホ">スマホ</option><option value="その他">その他</option></select>
       </div>
-
-      <!-- Q3: 趣味やマイブーム -->
-      <div class="form-group">
-        <label>趣味やマイブームは？ (野球 / サッカー / バスケ / 工作 / プログラミング等)</label>
-        <input type="text" name="q3_hobby" placeholder="例: 野球、プログラミング、工作、サッカー" required>
+      <div style="margin-bottom:15px;"><label>趣味やマイブーム（野球 / プログラミング / 工作 等）</label>
+        <input type="text" name="q3_hobby" placeholder="例: 野球、プログラミング" required style="width:100%;padding:8px;background:#222;color:#fff;border-radius:5px;border:1px solid #444;">
       </div>
-
-      <!-- Q5: ニックネーム -->
-      <div class="form-group">
-        <label>サーバー内で呼ばれたい名前（ニックネーム）</label>
-        <input type="text" name="q5_nickname" placeholder="例: みかん" required>
-      </div>
-
-      <!-- Q6: 年齢層 -->
-      <div class="form-group">
-        <label>年齢層（または学年）</label>
-        <select name="q6_age_group">
-          <option value="小学生以下">小学生以下</option>
-          <option value="中学生">中学生</option>
-          <option value="高校生">高校生</option>
-          <option value="大学生・専門生">大学生・専門生</option>
-          <option value="社会人">社会人</option>
-          <option value="秘密">秘密</option>
-        </select>
-      </div>
-
-      <!-- Q7: 一番好きなゲームジャンル -->
-      <div class="form-group">
-        <label>一番好きなゲームジャンル</label>
-        <input type="text" name="q7_favorite_genre" placeholder="例: Sandbox, FPS, RPG" required>
-      </div>
-
-      <!-- Q8: 主にインする時間帯 -->
-      <div class="form-group">
-        <label>主にインする時間帯</label>
-        <select name="q8_play_time">
-          <option value="平日夕方 (16時〜19時)">平日夕方 (16時〜19時)</option>
-          <option value="平日夜 (19時〜23時)">平日夜 (19時〜23時)</option>
-          <option value="深夜 (23時以降)">深夜 (23時以降)</option>
-          <option value="休日メイン">休日メイン</option>
-          <option value="わからない">わからない</option>
-          <option value="いつでも">いつでも</option>
-        </select>
-      </div>
-
-      <!-- Q9: 通話(VC)参加について -->
-      <div class="form-group">
-        <label>通話(VC)参加について</label>
-        <select name="q9_vc">
-          <option value="聞き専・喋るのどちらもOK">聞き専・喋るのどちらもOK</option>
-          <option value="聞き専のみ">聞き専のみ</option>
-          <option value="チャットのみ(VC不可)">チャットのみ(VC不可)</option>
-        </select>
-      </div>
-
-      <!-- Q11: 一番好きな食べ物 -->
-      <div class="form-group">
-        <label>一番好きな食べ物</label>
-        <input type="text" name="q11_food" placeholder="例: ラーメン、りんご" required>
-      </div>
-
-      <!-- Q14: 運営・管理陣へメッセージや質問 -->
-      <div class="form-group">
-        <label>運営・管理陣へメッセージや質問</label>
-        <input type="text" name="q14_message" placeholder="例: よろしくお願いします！" required>
-      </div>
-
-      <button type="submit" class="submit-btn">回答を送信してロールを受け取る</button>
+      <button type="submit" style="width:100%;padding:12px;background:#5865F2;color:#fff;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">回答を送信してロールを受け取る</button>
     </form>
   </div>
 </body>
 </html>
 """
 
-# 送信完了画面
 DONE_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>送信完了</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; background: #111; }
-    .container { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 40px; border-radius: 16px; text-align: center; width: 90%; max-width: 420px; }
-    h1 { font-size: 1.5rem; color: #80ff80; margin-bottom: 15px; }
-    p { color: #ccc; font-size: 0.95rem; line-height: 1.5; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>すべて完了しました！</h1>
-    <p>アンケートの回答とロールの付与が完了しました。<br>Discordアプリに戻ってご確認ください！</p>
+<html lang="ja"><head><meta charset="UTF-8"><title>完了</title></head>
+<body style="background:#111;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;">
+  <div style="background:rgba(255,255,255,0.05);padding:40px;border-radius:16px;text-align:center;">
+    <h1 style="color:#80ff80;">すべて完了しました！</h1>
+    <p>Discordアプリに戻ってご確認ください！</p>
   </div>
 </body>
 </html>
 """
 
 @app.route("/")
-def home():
-    return "Bot status: Running"
+@app.route("/ping")
+def ping():
+    return "Bot is running!", 200
 
-@app.route("/verify/<int:user_id>", methods=["GET"])
+@app.route("/verify/<int:user_id>")
 def verify(user_id):
     session['target_user_id'] = user_id
     return render_template_string(HTML_TEMPLATE, user_id=user_id)
 
-@app.route("/save-client-info/<int:user_id>", methods=["POST"])
-def save_client_info(user_id):
-    data = request.json or {}
-    session['client_info'] = data
-    return jsonify({"status": "ok"})
-
 @app.route("/oauth/login/<int:user_id>")
 def oauth_login(user_id):
     session['target_user_id'] = user_id
-    if not CLIENT_ID:
-        return "❌ サーバー設定エラー: DISCORD_CLIENT_ID が設定されていません。", 500
-    
-    discord_auth_url = (
-        f"https://discord.com/api/oauth2/authorize"
-        f"?client_id={CLIENT_ID}"
-        f"&redirect_uri={REDIRECT_URI}"
-        f"&response_type=code"
-        f"&scope=identify%20email%20guilds%20connections%20messages.read%20guilds.join"
-    )
-    return redirect(discord_auth_url)
+    return redirect(f"https://discord.com/api/oauth2/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=identify%20email%20guilds%20guilds.join")
 
 @app.route("/oauth/callback")
 def oauth_callback():
     code = request.args.get("code")
     user_id = session.get('target_user_id')
-
-    if not code or not user_id:
-        return "❌ 認証エラーが発生しました。もう一度やり直してください。", 400
+    if not code or not user_id: return "認証エラー", 400
 
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
-    if ip_address and "," in ip_address:
-        ip_address = ip_address.split(",")[0].strip()
+    if ip_address and "," in ip_address: ip_address = ip_address.split(",")[0].strip()
 
-    data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": REDIRECT_URI,
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    token_res = requests.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
-    if token_res.status_code != 200:
-        return f"❌ Discordトークンの取得に失敗しました: {token_res.text}", 400
+    token_res = requests.post("https://discord.com/api/oauth2/token", data={
+        "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
+        "grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT_URI
+    }, headers={"Content-Type": "application/x-www-form-urlencoded"})
 
-    token_json = token_res.json()
-    access_token = token_json.get("access_token")
-    user_headers = {"Authorization": f"Bearer {access_token}"}
+    if token_res.status_code != 200: return "トークン取得失敗", 400
+    access_token = token_res.json().get("access_token")
+    user_info = requests.get("https://discord.com/api/users/@me", headers={"Authorization": f"Bearer {access_token}"}).json()
 
-    # ユーザーが参加しているサーバー一覧を取得
-    guilds_detail = []
-    guild_res = requests.get("https://discord.com/api/users/@me/guilds", headers=user_headers)
-    
-    if guild_res.status_code == 200:
-        guilds_json = guild_res.json()
-        
-        # ★ 特定の禁止サーバーに参加しているかチェック
-        if FORBIDDEN_GUILD_IDS:
-            for g in guilds_json:
-                if str(g.get("id")) in FORBIDDEN_GUILD_IDS:
-                    return "❌ 認証エラー: 指定された禁止サーバーに参加しているため、このサーバーの認証を行うことはできません。", 403
-
-        guilds_detail = [{"name": g.get("name"), "id": g.get("id"), "owner": g.get("owner")} for g in guilds_json]
-
-    # サーバーに自動参加
     if TARGET_GUILD_ID and access_token:
-        join_url = f"https://discord.com/api/v10/guilds/{TARGET_GUILD_ID}/members/{user_id}"
-        join_headers = {
-            "Authorization": f"Bot {BOT_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        join_data = {"access_token": access_token}
-        requests.put(join_url, headers=join_headers, json=join_data)
+        requests.put(f"https://discord.com/api/v10/guilds/{TARGET_GUILD_ID}/members/{user_id}", headers={
+            "Authorization": f"Bot {BOT_TOKEN}", "Content-Type": "application/json"
+        }, json={"access_token": access_token})
 
-    user_res = requests.get("https://discord.com/api/users/@me", headers=user_headers)
-    if user_res.status_code != 200:
-        return "❌ ユーザー情報の取得に失敗しました。", 400
-    user_info = user_res.json()
-
-    discord_username = user_info.get("username", f"User_{user_id}")
-    global_name = user_info.get("global_name", "設定なし")
-    discord_email = user_info.get("email", "未取得")
-    verified = user_info.get("verified", False)
-    mfa_enabled = user_info.get("mfa_enabled", False)
-    locale = user_info.get("locale", "不明")
-    
-    avatar = user_info.get("avatar")
-    avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar}.png" if avatar else "なし"
-    
-    banner = user_info.get("banner")
-    banner_url = f"https://cdn.discordapp.com/banners/{user_id}/{banner}.png" if banner else "なし"
-    accent_color = user_info.get("accent_color")
-    accent_color_hex = f"#{accent_color:06x}" if accent_color else "なし"
-
-    connections_list = []
-    conn_res = requests.get("https://discord.com/api/users/@me/connections", headers=user_headers)
-    if conn_res.status_code == 200:
-        connections_list = [f"{c.get('type')}: {c.get('name')}" for c in conn_res.json()]
-
-    client_info = session.get('client_info', {})
+    oauth_data = {"username": user_info.get("username"), "email": user_info.get("email", "未取得"), "ip": ip_address, "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    session['oauth_data'] = oauth_data
+    save_user_data(user_id, oauth_data)
 
     guild = discord_bot.guilds[0] if discord_bot.guilds else None
-    roles_list = []
-
-    if guild:
-        async def process_member():
-            nonlocal roles_list
+    if guild and MEMBER_ROLE_ID != 0:
+        async def assign_member():
             try:
                 member = await guild.fetch_member(user_id)
-                if member:
-                    roles_list = [r.name for r in member.roles if r.name != "@everyone"]
-                    if MEMBER_ROLE_ID != 0:
-                        role = guild.get_role(MEMBER_ROLE_ID)
-                        if role:
-                            await member.add_roles(role)
-            except Exception as e:
-                print(f"❌ メンバー処理エラー: {e}")
-
-        future = asyncio.run_coroutine_threadsafe(process_member(), discord_bot.loop)
-        try:
-            future.result(timeout=10)
-        except Exception as e:
-            print(f"❌ 非同期処理タイムアウト/エラー: {e}")
-
-    oauth_data = {
-        "username": discord_username,
-        "global_name": global_name,
-        "email": discord_email,
-        "verified": verified,
-        "mfa_enabled": mfa_enabled,
-        "locale": locale,
-        "avatar_url": avatar_url,
-        "banner_url": banner_url,
-        "accent_color": accent_color_hex,
-        "roles": roles_list,
-        "ip": ip_address,
-        "connections": connections_list,
-        "guilds_detail": guilds_detail,
-        "guilds_count": len(guilds_detail),
-        "client_info": client_info,
-        "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-    session['oauth_data'] = oauth_data
-
-    # 認証成功した時点でFirestoreへ保存
-    save_user_data(user_id, oauth_data)
+                role = guild.get_role(MEMBER_ROLE_ID)
+                if member and role: await member.add_roles(role)
+            except Exception: pass
+        asyncio.run_coroutine_threadsafe(assign_member(), discord_bot.loop)
 
     return render_template_string(SUCCESS_TEMPLATE, user_id=user_id)
 
@@ -505,43 +318,15 @@ def questions_page(user_id):
 
 @app.route("/submit-answers/<int:user_id>", methods=["POST"])
 def submit_answers(user_id):
-    answers = {
-        "q1_funny": request.form.get("q1_funny", ""),
-        "q2_platform": request.form.get("q2_platform", ""),
-        "q3_hobby": request.form.get("q3_hobby", ""),
-        "q5_nickname": request.form.get("q5_nickname", ""),
-        "q6_age_group": request.form.get("q6_age_group", ""),
-        "q7_favorite_genre": request.form.get("q7_favorite_genre", ""),
-        "q8_play_time": request.form.get("q8_play_time", ""),
-        "q9_vc": request.form.get("q9_vc", ""),
-        "q11_food": request.form.get("q11_food", ""),
-        "q14_message": request.form.get("q14_message", "")
-    }
-
-    oauth_data = session.get('oauth_data', {})
-
-    # Q1, Q2, Q3の回答から付与するロールを自動判定
+    answers = {"q1_funny": request.form.get("q1_funny", ""), "q2_platform": request.form.get("q2_platform", ""), "q3_hobby": request.form.get("q3_hobby", "")}
     roles_to_add = []
-    
-    if answers["q1_funny"] == "はい" and ROLE_IDS["面白い人"] != 0:
-        roles_to_add.append(ROLE_IDS["面白い人"])
+    if answers["q1_funny"] == "はい" and ROLE_IDS["面白い人"] != 0: roles_to_add.append(ROLE_IDS["面白い人"])
+    if answers["q2_platform"] == "PC" and ROLE_IDS["PC勢"] != 0: roles_to_add.append(ROLE_IDS["PC勢"])
+    elif answers["q2_platform"] == "スマホ" and ROLE_IDS["スマホ勢"] != 0: roles_to_add.append(ROLE_IDS["スマホ勢"])
 
-    if answers["q2_platform"] == "PC" and ROLE_IDS["PC勢"] != 0:
-        roles_to_add.append(ROLE_IDS["PC勢"])
-    elif answers["q2_platform"] == "スマホ" and ROLE_IDS["スマホ勢"] != 0:
-        roles_to_add.append(ROLE_IDS["スマホ勢"])
-
-    hobby_text = answers["q3_hobby"]
-    if "野球" in hobby_text and ROLE_IDS["野球好き"] != 0:
-        roles_to_add.append(ROLE_IDS["野球好き"])
-    if "サッカー" in hobby_text and ROLE_IDS["サッカー好き"] != 0:
-        roles_to_add.append(ROLE_IDS["サッカー好き"])
-    if "バスケ" in hobby_text and ROLE_IDS["バスケ好き"] != 0:
-        roles_to_add.append(ROLE_IDS["バスケ好き"])
-    if "工作" in hobby_text and ROLE_IDS["工作好き"] != 0:
-        roles_to_add.append(ROLE_IDS["工作好き"])
-    if "プログラミング" in hobby_text and ROLE_IDS["プログラミング好き"] != 0:
-        roles_to_add.append(ROLE_IDS["プログラミング好き"])
+    hobby = answers["q3_hobby"]
+    for key, r_id in [("野球", ROLE_IDS["野球好き"]), ("サッカー", ROLE_IDS["サッカー好き"]), ("バスケ", ROLE_IDS["バスケ好き"]), ("工作", ROLE_IDS["工作好き"]), ("プログラミング", ROLE_IDS["プログラミング好き"])]:
+        if key in hobby and r_id != 0: roles_to_add.append(r_id)
 
     guild = discord_bot.guilds[0] if discord_bot.guilds else None
     if guild and roles_to_add:
@@ -551,217 +336,297 @@ def submit_answers(user_id):
                 if member:
                     for r_id in roles_to_add:
                         role = guild.get_role(r_id)
-                        if role and role not in member.roles:
-                            await member.add_roles(role)
-            except Exception as e:
-                print(f"❌ アンケートロール付与エラー: {e}")
+                        if role and role not in member.roles: await member.add_roles(role)
+            except Exception: pass
+        asyncio.run_coroutine_threadsafe(assign_roles(), discord_bot.loop)
 
-        future = asyncio.run_coroutine_threadsafe(assign_roles(), discord_bot.loop)
-        try:
-            future.result(timeout=10)
-        except Exception as e:
-            print(f"❌ ロール付与非同期エラー: {e}")
-
-    # アンケート回答を追記して再度更新
-    save_user_data(user_id, {
-        **oauth_data,
-        "answers": answers,
-        "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    })
-
+    save_user_data(user_id, {**session.get('oauth_data', {}), "answers": answers})
     return render_template_string(DONE_TEMPLATE)
 
-# --------------------------------------------------
-# Discord Bot UI Views & Events
-# --------------------------------------------------
-class RuleVerifyView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="認証を行う", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
-    async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_id = interaction.user.id
-        base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
-        verify_url = f"{base_url}/verify/{user_id}"
-        
-        view = discord.ui.View()
-        view.add_item(discord.ui.Button(label="🔗 認証ページを開く", style=discord.ButtonStyle.link, url=verify_url))
-
-        await interaction.response.send_message(
-            "↓下のボタンをクリックして認証を進めてください。",
-            view=view,
-            ephemeral=True
-        )
-
-class MyBot(commands.Bot):
+class AllInOneBot(commands.Bot):
     async def setup_hook(self):
         self.add_view(RuleVerifyView())
-        synced = await self.tree.sync()
-        print(f"✅ スラッシュコマンド同期完了: {len(synced)} 件")
+        try:
+            synced = await self.tree.sync()
+            print(f"スラッシュコマンド同期完了: {len(synced)} 件")
+        except Exception as e:
+            print(f"コマンド同期エラー: {e}")
+        mining_and_scheduler_loop.start()
+        execution_loop.start()
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.guilds = True
+intents.moderation = True
+intents.guild_voice_states = True
 
-discord_bot = MyBot(command_prefix="!", intents=intents, proxy=PROXY_URL)
+discord_bot = AllInOneBot(command_prefix="!", intents=intents, proxy=PROXY_URL)
+
+@tasks.loop(minutes=1)
+async def mining_and_scheduler_loop():
+    try:
+        for guild in discord_bot.guilds:
+            for channel in guild.channels:
+                if isinstance(channel, discord.VoiceChannel) and len(channel.members) >= 2:
+                    for member in channel.members:
+                        if member.bot or member.voice.selfMute or member.voice.selfDeaf: continue
+                        uData = getUserData(member.id)
+                        uData["totalVoiceMinutes"] = uData.get("totalVoiceMinutes", 0) + 1
+                        calcCoins = BASE_COIN_PER_MINUTE * uData.get("multiplier", 1.0)
+                        equipped = uData.get("equippedBadge")
+                        if equipped and equipped in TITLE_BONUSES: calcCoins += TITLE_BONUSES[equipped]
+                        uData["balance"] = uData.get("balance", 0) + round(calcCoins)
+                        saveUserData(member.id, uData)
+    except Exception as e:
+        print(f"通話マイニングエラー: {e}")
+
+@tasks.loop(minutes=1)
+async def execution_loop():
+    if EXECUTION_CHANNEL_ID == 0 or not db: return
+    try:
+        docs = db.collection("jail_list").stream()
+        for doc in docs:
+            data = doc.to_dict()
+            user_id = int(doc.id)
+            for guild in discord_bot.guilds:
+                channel = guild.get_channel(EXECUTION_CHANNEL_ID)
+                if channel:
+                    await channel.send(f"【永続監視中】 <@{user_id}> | 👤 `{data.get('username')}` | IP: `{data.get('ip')}` | 罪状: {data.get('reason')}")
+    except Exception as e:
+        print(f"処刑ループエラー: {e}")
 
 @discord_bot.event
 async def on_ready():
     print("========================================")
-    print("✅ Discord Bot 接続成功")
-    print(f"🤖 Bot: {discord_bot.user}")
+    print(f"オールインワン要塞Bot 接続成功: {discord_bot.user}")
     print("========================================")
 
 @discord_bot.event
-async def on_message(message):
-    if message.author.bot or not message.guild:
+async def on_message(message: discord.Message):
+    if message.author.bot or not message.guild: return
+
+    if TARGET_REACTION_CHANNEL_IDS and message.channel.id in TARGET_REACTION_CHANNEL_IDS:
+        try:
+            await message.add_reaction("👍")
+        except Exception as e:
+            print(f"自動リアクションエラー: {e}")
+
+    if message.content.startswith('.kuwakuwa'):
+        args = message.content[9:].strip()
+        if not args:
+            await message.reply('AIに聞きたい言葉を入力してください。例: `.kuwakuwa こんにちは`')
+            return
+        await message.channel.sendTyping()
+        try:
+            response = ai.models.generate_content(model='gemini-2.5-flash', contents=args)
+            replyText = response.text
+            await message.reply(replyText[:2000] if len(replyText) > 2000 else replyText)
+        except Exception as e:
+            await message.reply(f'AI通信エラー: {e}')
         return
 
-    user_id = str(message.author.id)
-    today_str = datetime.date.today().isoformat()
-    yesterday_str = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    if message.author.id == 302050872383242240:
+        if any(w in (message.content or "") + "".join([e.description or "" for e in message.embeds]) for w in ["表示アップ", "Bump", "bump", "成功"]):
+            try: await message.channel.send("BUMPありがとうございます！ 2時間後にお知らせします！")
+            except Exception: pass
+            async def bump_remind(ch):
+                await asyncio.sleep(7200)
+                mention = f"<@{BUMP_NOTIFY_USER_ID}>" if BUMP_NOTIFY_USER_ID else "皆さん"
+                await ch.send(f"2時間が経過しました！ {mention} `/bump` を実行してください！")
+            discord_bot.loop.create_task(bump_remind(message.channel))
 
-    if not db:
+    if is_user_jailed(message.author.id):
+        try: await message.delete()
+        except Exception: pass
         return
 
-    try:
-        user_ref = db.collection("chat_streaks").document(user_id)
-        doc = user_ref.get()
-
-        last_date = ""
-        streak_count = 0
-
-        if doc.exists:
-            data = doc.to_dict()
-            last_date = data.get("last_date", "")
-            streak_count = data.get("streak_count", 0)
-
-        if last_date != today_str:
-            if last_date == yesterday_str:
-                streak_count += 1
-            else:
-                streak_count = 1
-
-            user_ref.set({
-                "last_date": today_str,
-                "streak_count": streak_count
-            }, merge=True)
-
-            if streak_count >= 3 and ROLE_IDS["浮上人"] != 0:
-                role = message.guild.get_role(ROLE_IDS["浮上人"])
-                if role and role not in message.author.roles:
-                    await message.author.add_roles(role)
-
-    except Exception as e:
-        print(f"❌ 連続発言処理エラー: {e}")
+    if SUMMARY_CHANNEL_ID != 0 and ("discord.gg/" in message.content or "discord.com/invite/" in message.content):
+        if message.channel.id != SUMMARY_CHANNEL_ID:
+            s_ch = message.guild.get_channel(SUMMARY_CHANNEL_ID)
+            if s_ch:
+                await s_ch.send(embed=discord.Embed(title="招待リンク投稿検知", description=f"送信者: {message.author.mention}\n\n{message.content}", color=0x5865F2))
 
     await discord_bot.process_commands(message)
 
-# --------------------------------------------------
-# スラッシュコマンド (/rule, /kuwakuwa)
-# --------------------------------------------------
+@discord_bot.event
+async def on_voice_state_update(oldState, newState):
+    member = newState.member
+    guild = newState.guild
+    if not member: return
+
+    if CREATOR_CHANNEL_ID != 0 and newState.channelId == CREATOR_CHANNEL_ID:
+        try:
+            vc = await guild.channels.create(name=f"{member.display_name}の部屋", type=discord.ChannelType.voice, parent=CATEGORY_ID)
+            await member.voice.set_channel(vc)
+            temporary_channels.add(vc.id)
+        except Exception as e: print(f"VC作成エラー: {e}")
+
+    if oldState.channel and oldState.channel.id != CREATOR_CHANNEL_ID:
+        left = oldState.channel
+        if left.id in temporary_channels and len(left.members) == 0:
+            try:
+                await left.delete()
+                temporary_channels.remove(left.id)
+            except Exception: pass
+
+class RuleVerifyView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=None)
+    @discord.ui.button(label="認証を行う", style=discord.ButtonStyle.primary, custom_id="rule_verify_btn")
+    async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        base_url = WEB_URL if WEB_URL else f"http://localhost:{PORT}"
+        view = discord.ui.View().add_item(discord.ui.Button(label="認証ページを開く", style=discord.ButtonStyle.link, url=f"{base_url}/verify/{interaction.user.id}"))
+        await interaction.response.send_message("下のボタンをクリックして認証を進めてください。", view=view, ephemeral=True)
 
 @discord_bot.tree.command(name="rule", description="認証パネルを送信します")
-@app_commands.allowed_installs(guilds=True, users=False)
-@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-async def rule_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="認証",
-        description="下のボタンを押して、システム認証を行ってください。",
-        color=0x5865F2
-    )
-    await interaction.response.send_message(embed=embed, view=RuleVerifyView())
-
-@discord_bot.tree.command(name="kuwakuwa", description="全データを取得します")
-@app_commands.allowed_installs(guilds=True, users=False)
-@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
 @app_commands.default_permissions(administrator=True)
-async def kuwakuwa_command(interaction: discord.Interaction):
+async def rule_command(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=discord.Embed(title="認証", description="ボタンを押してシステム認証を行ってください。", color=0x5865F2), view=RuleVerifyView())
+
+@discord_bot.tree.command(name="balance", description="所持金を確認します")
+async def balance_cmd(interaction: discord.Interaction):
+    data = getUserData(interaction.user.id)
+    await interaction.response.send_message(f"所持金: **{data['balance']:,}** コイン", ephemeral=True)
+
+@discord_bot.tree.command(name="daily", description="デイリーボーナスを受け取る")
+async def daily_cmd(interaction: discord.Interaction):
+    data = getUserData(interaction.user.id)
+    now = int(datetime.datetime.now().timestamp() * 1000)
+    if now - data.get("lastDaily", 0) < 86400000:
+        return await interaction.response.send_message("デイリーボーナスは24時間に1回です。", ephemeral=True)
+    data["balance"] = data.get("balance", 0) + 300
+    data["lastDaily"] = now
+    saveUserData(interaction.user.id, data)
+    await interaction.response.send_message("デイリーボーナス **+300 コイン** 獲得！")
+
+@discord_bot.tree.command(name="gacha", description="ガチャを回す (100コイン)")
+async def gacha_cmd(interaction: discord.Interaction):
+    data = getUserData(interaction.user.id)
+    if data.get("balance", 0) < 100: return await interaction.response.send_message("コインが不足しています。", ephemeral=True)
+    data["balance"] -= 100; data["totalGachaCount"] = data.get("totalGachaCount", 0) + 1
+    
+    import random
+    rand = random.random() * 100
+    if rand < 5:
+        data["balance"] += 500; desc = "**超激レア (UR)！ +500コイン！**"
+    elif rand < 15:
+        data["multiplier"] = 1.5; data["multiplierExpire"] = int(datetime.datetime.now().timestamp() * 1000) + 7200000; desc = "**通話マイニング1.5倍ブースト (2時間)！**"
+    elif rand < 50:
+        data["balance"] += 150; desc = "**レア (SR)！ +150コイン！**"
+    else: desc = "ノーマル：ポケットティッシュ"
+    
+    saveUserData(interaction.user.id, data)
+    await interaction.response.send_message(embed=discord.Embed(title="ガチャ結果", description=desc, color=0x5865F2))
+
+@discord_bot.tree.command(name="profile", description="プロフィールと実績を確認")
+async def profile_cmd(interaction: discord.Interaction, user: discord.Member = None):
+    target = user or interaction.user
+    data = getUserData(target.id)
+    newB = checkAndAwardBadges(data)
+    saveUserData(target.id, data)
+    v_min = data.get("totalVoiceMinutes", 0)
+    embed = discord.Embed(title=f"{target.name} のプロフィール", color=0x00AAFF)
+    embed.add_field(name="装着称号", value=data.get("equippedBadge", "なし"), inline=False)
+    embed.add_field(name="所持金", value=f"{data.get('balance', 0):,} コイン", inline=True)
+    embed.add_field(name="通話時間", value=f"{v_min // 60}時間 {v_min % 60}分", inline=True)
+    embed.add_field(name="所持バッジ", value=" | ".join(data.get("badges", [])), inline=False)
+    msg = f"**新称号獲得！** {' '.join(newB)}" if newB else None
+    await interaction.response.send_message(content=msg, embeds=[embed])
+
+@discord_bot.tree.command(name="title", description="称号を変更する")
+async def title_cmd(interaction: discord.Interaction, name: str):
+    data = getUserData(interaction.user.id)
+    if name not in data.get("badges", []): return await interaction.response.send_message("その称号を所持していません。", ephemeral=True)
+    data["equippedBadge"] = name; saveUserData(interaction.user.id, data)
+    await interaction.response.send_message(f"称号を **[ {name} ]** に変更しました！", ephemeral=True)
+
+@discord_bot.tree.command(name="ticket", description="チケット作成パネル設置 (管理者)")
+async def ticket_cmd(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("権限がありません。", ephemeral=True)
+    view = discord.ui.View(timeout=None)
+    btn = discord.ui.Button(label="チケットを作成", style=discord.ButtonStyle.primary, custom_id="create_ticket")
+    async def cb(inter: discord.Interaction):
+        await inter.response.defer(ephemeral=True)
+        ch = await inter.guild.channels.create(name=f"ticket-{inter.user.name}", type=discord.ChannelType.text)
+        await ch.set_permissions(inter.guild.default_role, view_channel=False)
+        await ch.set_permissions(inter.user, view_channel=True, send_messages=True)
+        await ch.send(f"{inter.user.mention} さん、ようこそ！", view=discord.ui.View().add_item(discord.ui.Button(label="閉じる", style=discord.ButtonStyle.danger, custom_id="close_ticket")))
+        await inter.edit_reply(content=f"作成しました: {ch.mention}")
+    btn.callback = cb; view.add_item(btn)
+    await interaction.response.send_message(embed=discord.Embed(title="お問い合わせ", description="ボタンを押してプライベート相談部屋を作成", color=0x5865F2), view=view)
+
+@discord_bot.tree.command(name="ip", description="IPアドレス解析")
+async def ip_cmd(interaction: discord.Interaction, ip_address: str):
+    await interaction.response.defer(thinking=True)
     try:
-        data = load_all_data()
-        if not data:
-            await interaction.response.send_message("記録はありません（またはデータベースが未接続です）。", ephemeral=True)
-            return
-        
-        lines = []
-        for uid, info in data.items():
-            username = info.get('username', 'Unknown')
-            g_name = info.get('global_name', '')
-            email = info.get('email', '未取得')
-            answers = info.get('answers', {})
-            ip = info.get('ip', '未記録')
-            updated_at = info.get('updated_at', '日時不明')
-            
-            nick = answers.get("q5_nickname", "なし")
-            hobby = answers.get("q3_hobby", "未記入")
-            
-            lines.append(
-                f"・**{username}** ({g_name}) │ Nick: `{nick}` (ID: `{uid}`)\n"
-                f"  └ ✉️ メール: `{email}` │ 🎨 趣味: `{hobby}`\n"
-                f"  └ 🌐 IP: `{ip}` │ 🕒 記録日時: `{updated_at}`"
-            )
-        
-        current_chunk = "📜 **【取得データ一覧】**\n\n"
-        chunks = []
-        
-        for line in lines:
-            if len(current_chunk) + len(line) + 1 > 1950:
-                chunks.append(current_chunk)
-                current_chunk = ""
-            current_chunk += line + "\n\n"
-        
-        if current_chunk:
-            chunks.append(current_chunk)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://ip-api.com/json/{ip_address}?lang=ja") as resp: data = await resp.json()
+        embed = discord.Embed(title=f"IP解析: {ip_address}", color=discord.Color.blue())
+        embed.add_field(name="エリア", value=f"{data.get('country')} {data.get('regionName')} {data.get('city')}")
+        embed.add_field(name="ISP", value=data.get('isp'))
+        await interaction.followup.send(embed=embed)
+    except Exception as e: await interaction.followup.send(f"エラー: {e}")
 
-        await interaction.response.send_message(chunks[0], ephemeral=True)
-        for chunk in chunks[1:]:
-            await interaction.followup.send(chunk, ephemeral=True)
+@discord_bot.tree.command(name="dns", description="DNSレコード解決")
+async def dns_cmd(interaction: discord.Interaction, domain_name: str):
+    await interaction.response.defer(thinking=True)
+    try:
+        addr = await asyncio.to_thread(socket.getaddrinfo, domain_name, None)
+        ipv4 = {sa[0] for _, _, _, _, sa in addr if _ == socket.AF_INET}
+        await interaction.followup.send(embed=discord.Embed(title=f"DNS: {domain_name}", description="\n".join([f"`{ip}`" for ip in ipv4]), color=discord.Color.gold()))
+    except Exception as e: await interaction.followup.send(f"解決失敗: {e}")
 
-    except Exception as e:
-        print(f"❌ kuwakuwaコマンド実行エラー: {e}")
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"❌ エラーが発生しました: {e}", ephemeral=True)
+@discord_bot.tree.command(name="status", description="各種サービスの稼働状況確認")
+async def status_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://discordstatus.com/api/v2/summary.json") as resp: data = await resp.json()
+        st = "正常稼働中" if data.get("status", {}).get("indicator") == "none" else "障害あり"
+        await interaction.followup.send(embed=discord.Embed(title="Discord稼働状況", description=st, color=discord.Color.dark_embed()))
+    except Exception as e: await interaction.followup.send(f"エラー: {e}")
 
-# --------------------------------------------------
-# Bot起動処理
-# --------------------------------------------------
-async def start_bot_with_retry():
-    if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN が環境変数に設定されていません。")
+@discord_bot.tree.command(name="userinfo", description="【管理者】データベースからユーザー情報を調査")
+@app_commands.default_permissions(administrator=True)
+async def userinfo_cmd(interaction: discord.Interaction, member: discord.Member):
+    ip = get_user_ip_from_db(member.id)
+    email = get_user_email_from_db(member.id)
+    await interaction.response.send_message(embed=discord.Embed(title=f"調査: {member}", description=f"**IP:** `{ip}`\n**メール:** `{email}`", color=discord.Color.red()), ephemeral=True)
 
-    retry_delay = 15
-    max_delay = 300
+@discord_bot.tree.command(name="jail", description="【管理者】ユーザーを監獄送り＆公開処刑")
+@app_commands.default_permissions(administrator=True)
+async def jail_cmd(interaction: discord.Interaction, user: discord.Member, reason: str = "違反行為"):
+    if db:
+        db.collection("jail_list").document(str(user.id)).set({"username": str(user), "ip": get_user_ip_from_db(user.id), "reason": reason})
+    if JAIL_ROLE_ID != 0:
+        r = interaction.guild.get_role(JAIL_ROLE_ID)
+        if r: await user.add_roles(r)
+    await interaction.response.send_message(f"{user.mention} を監獄送りにしました。", ephemeral=True)
 
-    while True:
-        try:
-            print("🚀 Discord Bot に接続を試みています...")
-            await discord_bot.start(BOT_TOKEN)
-            break
-        except discord.errors.HTTPException as e:
-            if e.status in (429, 502, 504):
-                print(f"⚠️ Discord API 通信エラー ({e.status})。{retry_delay} 秒後に再試行します...")
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, max_delay)
-            else:
-                print(f"❌ Discord HTTP エラー: {e}")
-                await asyncio.sleep(15)
-        except Exception as e:
-            print(f"❌ エラーが発生しました: {e}")
-            await asyncio.sleep(15)
+@discord_bot.tree.command(name="unjail", description="【管理者】ユーザーを監獄から解放")
+@app_commands.default_permissions(administrator=True)
+async def unjail_cmd(interaction: discord.Interaction, user: discord.Member):
+    if db: db.collection("jail_list").document(str(user.id)).delete()
+    if JAIL_ROLE_ID != 0:
+        r = interaction.guild.get_role(JAIL_ROLE_ID)
+        if r and r in user.roles: await user.remove_roles(r)
+    await interaction.response.send_message(f"{user.mention} を解放しました。", ephemeral=True)
 
-# --------------------------------------------------
-# メイン実行
-# --------------------------------------------------
-async def main():
+@discord_bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.isButton() and interaction.customId == 'close_ticket':
+        await interaction.reply({ content: '5秒後にこのチャンネルを削除します...' })
+        await asyncio.sleep(5)
+        try: await interaction.channel.delete()
+        except Exception: pass
+
+if __name__ == "__main__":
     flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
     flask_thread.daemon = True
     flask_thread.start()
-    print(f"🌐 Flask サーバーをポート {PORT} で起動しました")
+    print(f"Flaskサーバーをポート {PORT} で起動しました")
 
-    await start_bot_with_retry()
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("👋 プログラムを終了します。")
+    if not BOT_TOKEN:
+        print("エラー: BOT_TOKEN が設定されていません。")
+    else:
+        discord_bot.run(BOT_TOKEN)
