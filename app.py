@@ -348,8 +348,14 @@ class AllInOneBot(commands.Bot):
     async def setup_hook(self):
         self.add_view(RuleVerifyView())
         try:
-            synced = await self.tree.sync()
-            print(f"Synced {len(synced)} slash commands.")
+            guild_obj = discord.Object(id=int(TARGET_GUILD_ID)) if TARGET_GUILD_ID and TARGET_GUILD_ID.isdigit() else None
+            if guild_obj:
+                self.tree.copy_global_to(guild=guild_obj)
+                synced = await self.tree.sync(guild=guild_obj)
+                print(f"Synced {len(synced)} slash commands to guild.")
+            else:
+                synced = await self.tree.sync()
+                print(f"Synced {len(synced)} global slash commands.")
         except Exception as e:
             print(f"Command sync error: {e}")
         mining_and_scheduler_loop.start()
