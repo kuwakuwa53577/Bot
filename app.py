@@ -358,8 +358,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
-intents.moderation = True
-intents.guild_voice_states = True
+intents.voice_states = True
 
 discord_bot = AllInOneBot(command_prefix="!", intents=intents, proxy=PROXY_URL)
 
