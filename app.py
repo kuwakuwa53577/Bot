@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 import datetime
+import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 import discord
@@ -17,6 +18,9 @@ from flask import Flask, render_template_string, request, jsonify, redirect, ses
 
 import firebase_admin
 from firebase_admin import credentials, firestore
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from google.genai import Client
 ai = Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -43,6 +47,10 @@ WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID", "0"))
 CREATOR_CHANNEL_ID = int(os.getenv("CREATOR_VOICE_CHANNEL_ID", "0"))
 CATEGORY_ID = os.getenv("CATEGORY_ID", "0")
 CATEGORY_ID = int(CATEGORY_ID) if CATEGORY_ID.isdigit() and CATEGORY_ID != "0" else None
+
+TARGET_CHANNEL_ID = int(os.getenv("TARGET_CHANNEL_ID", "0"))
+MILESTONE_CHANNEL_ID = int(os.getenv("MILESTONE_CHANNEL_ID", str(WELCOME_CHANNEL_ID)))
+JST = ZoneInfo("Asia/Tokyo")
 
 BUMP_CHANNEL_ID = int(os.getenv("BUMP_CHANNEL_ID", "0"))
 BUMP_NOTIFY_USER_ID = int(os.getenv("BUMP_NOTIFY_USER_ID", "0"))
@@ -84,11 +92,6 @@ TITLE_BONUSES = {
     '大富豪': 5
 }
 
-RAID_TIME_WINDOW = 10  
-RAID_JOIN_LIMIT = 5   
-recent_joins = []     
-is_raid_mode = False  
-message_spam_track = {}
 temporary_channels = set()
 
 firebase_creds_json = os.getenv("FIREBASE_CREDENTIALS")
@@ -344,6 +347,34 @@ def submit_answers(user_id):
     save_user_data(user_id, {**session.get('oauth_data', {}), "answers": answers})
     return render_template_string(DONE_TEMPLATE)
 
+class DynamicRoleButton(discord.ui.Button):
+    def __init__(self, label: str, role_id: int):
+        super().__init__(style=discord.ButtonStyle.primary, label=label, custom_id=f"role_btn_{role_id}")
+        self.role_id = role_id
+
+    async def callback(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        if not guild: return
+        role = guild.get_role(self.role_id)
+        if not role:
+            return await interaction.response.send_message("指定されたロールが見つかりませんでした。", ephemeral=True)
+        member = interaction.user
+        try:
+            if role in member.roles:
+                await member.remove_roles(role)
+                await interaction.response.send_message(f"ロール [{role.name}] を解除しました。", ephemeral=True)
+            else:
+                await member.add_roles(role)
+                await interaction.response.send_message(f"ロール [{role.name}] を付与しました。", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"ロールの変更に失敗しました: {e}", ephemeral=True)
+
+class DynamicRoleView(discord.ui.View):
+    def __init__(self, buttons_info: list):
+        super().__init__(timeout=None)
+        for label, role_id in buttons_info:
+            self.add_item(DynamicRoleButton(label, role_id))
+
 class AllInOneBot(commands.Bot):
     async def setup_hook(self):
         self.add_view(RuleVerifyView())
@@ -358,6 +389,13 @@ class AllInOneBot(commands.Bot):
                 print(f"Synced {len(synced)} global slash commands.")
         except Exception as e:
             print(f"Command sync error: {e}")
+        
+        scheduler = AsyncIOScheduler(timezone=JST)
+        scheduler.add_job(job_morning, CronTrigger(hour=7, minute=0, timezone=JST))
+        scheduler.add_job(job_evening, CronTrigger(hour=16, minute=30, timezone=JST))
+        scheduler.add_job(job_night, CronTrigger(hour=22, minute=0, timezone=JST))
+        scheduler.start()
+
         mining_and_scheduler_loop.start()
         execution_loop.start()
 
@@ -368,6 +406,88 @@ intents.guilds = True
 intents.voice_states = True
 
 discord_bot = AllInOneBot(command_prefix="!", intents=intents, proxy=PROXY_URL)
+
+async def get_weather():
+    url = "https://weather.tsukumijima.net/api/forecast/city/130010"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    forecasts = data.get("forecasts", [])
+                    if forecasts:
+                        today = forecasts[0]
+                        telop = today.get("telop", "不明")
+                        temp_data = today.get("temperature", {})
+                        max_temp = temp_data.get("max", {}).get("celsius", "-")
+                        min_temp = temp_data.get("min", {}).get("celsius", "-")
+                        return f"東京の天気: {telop} / 最低 {min_temp}℃ / 最高 {max_temp}℃"
+    except Exception: pass
+    return "天気情報の取得に失敗しました。"
+
+async def get_news():
+    news_list = []
+    url = "https://www.nhk.or.jp/rss/news/cat0.xml"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    root = ET.fromstring(text)
+                    items = root.findall(".//item")[:5]
+                    for item in items:
+                        t = item.find("title")
+                        l = item.find("link")
+                        if t is not None and l is not None:
+                            news_list.append(f"• [{t.text}]({l.text})")
+    except Exception: pass
+    return "\n".join(news_list) if news_list else "ニュースの取得に失敗しました。"
+
+async def get_earthquake_info():
+    url = "https://api.p2pquake.net/v2/history?codes=551&limit=1"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data and isinstance(data, list) and len(data) > 0:
+                        latest = data[0]
+                        eq = latest.get("earthquake", {})
+                        t = eq.get("time", "不明")
+                        hypo = eq.get("hypocenter", {}).get("name", "不明")
+                        mag = eq.get("hypocenter", {}).get("magnitude", "不明")
+                        return f"発生時刻: {t}\n震源地: {hypo} (M{mag})"
+    except Exception: pass
+    return "地震情報の取得に失敗しました。"
+
+async def get_target_channel():
+    if TARGET_CHANNEL_ID == 0: return None
+    try:
+        ch = discord_bot.get_channel(TARGET_CHANNEL_ID)
+        if not ch: ch = await discord_bot.fetch_channel(TARGET_CHANNEL_ID)
+        return ch
+    except Exception: return None
+
+async def job_morning():
+    ch = await get_target_channel()
+    if not ch: return
+    w = await get_weather()
+    n = await get_news()
+    q = await get_earthquake_info()
+    embed = discord.Embed(title="おはようございます！本日の朝刊情報", color=discord.Color.gold())
+    embed.add_field(name="天気予報", value=w, inline=False)
+    embed.add_field(name="最新ニュース (上位5件)", value=n, inline=False)
+    embed.add_field(name="地震情報", value=q, inline=False)
+    await ch.send("おはようございます！今日も一日頑張りましょう！", embed=embed)
+
+async def job_evening():
+    ch = await get_target_channel()
+    if ch: await ch.send("夕方ですね、外出などの際は気を付けてください。")
+
+async def job_night():
+    ch = await get_target_channel()
+    if ch: await ch.send("夜ですね。そろそろ休みましょう。")
 
 @tasks.loop(minutes=1)
 async def mining_and_scheduler_loop():
@@ -407,19 +527,34 @@ async def on_ready():
     print(f"Bot connected: {discord_bot.user}")
 
 @discord_bot.event
+async def on_member_join(member: discord.Member):
+    if WELCOME_CHANNEL_ID != 0:
+        try:
+            wch = discord_bot.get_channel(WELCOME_CHANNEL_ID) or await discord_bot.fetch_channel(WELCOME_CHANNEL_ID)
+            if wch:
+                await wch.send(f"{member.mention} さんがサーバーに参加しました！")
+        except Exception: pass
+    if MILESTONE_CHANNEL_ID != 0:
+        try:
+            total = member.guild.member_count
+            if total % 10 == 0:
+                mch = discord_bot.get_channel(MILESTONE_CHANNEL_ID) or await discord_bot.fetch_channel(MILESTONE_CHANNEL_ID)
+                if mch:
+                    await mch.send(embed=discord.Embed(title="メンバー突破記念", description=f"総メンバー数が **{total}人** に到達しました！", color=discord.Color.purple()))
+        except Exception: pass
+
+@discord_bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild: return
 
     if TARGET_REACTION_CHANNEL_IDS and message.channel.id in TARGET_REACTION_CHANNEL_IDS:
-        try:
-            await message.add_reaction("👍")
-        except Exception as e:
-            print(f"Auto reaction error: {e}")
+        try: await message.add_reaction("👍")
+        except Exception: pass
 
     if message.content.startswith('.kuwakuwa'):
         args = message.content[9:].strip()
         if not args:
-            await message.reply('Please provide text for AI. Example: `.kuwakuwa hello`')
+            await message.reply('Please provide text for AI.')
             return
         await message.channel.sendTyping()
         try:
@@ -558,6 +693,18 @@ async def ticket_cmd(interaction: discord.Interaction):
         await inter.edit_reply(content=f"作成しました: {ch.mention}")
     btn.callback = cb; view.add_item(btn)
     await interaction.response.send_message(embed=discord.Embed(title="お問い合わせ", description="ボタンを押してプライベート相談部屋を作成", color=0x5865F2), view=view)
+
+@discord_bot.tree.command(name="reaction_role", description="【管理者専用】ロール付与ボタンパネルを作成します")
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(title="タイトル", message="本文", role1="ロール1", label1="ラベル1", role2="ロール2", label2="ラベル2")
+async def reaction_role_command(interaction: discord.Interaction, title: str, message: str, role1: discord.Role, label1: str, role2: discord.Role = None, label2: str = None):
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    buttons_info = [(label1, role1.id)]
+    if role2 and label2: buttons_info.append((label2, role2.id))
+    embed = discord.Embed(title=title, description=message, color=discord.Color.blue())
+    view = DynamicRoleView(buttons_info)
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.followup.send("リアクションロールパネルを送信しました！", ephemeral=True)
 
 @discord_bot.tree.command(name="ip", description="IPアドレス解析")
 async def ip_cmd(interaction: discord.Interaction, ip_address: str):
