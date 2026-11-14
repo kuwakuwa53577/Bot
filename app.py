@@ -98,22 +98,22 @@ if firebase_creds_json:
             cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
-        print("Firebase Admin SDK の初期化に成功しました")
+        print("Firebase Admin SDK initialized successfully")
     except Exception as e:
-        print(f"Firebase 初期化エラー: {e}")
+        print(f"Firebase init error: {e}")
 
 db = None
 try:
     if firebase_admin._apps:
         db = firestore.client()
-        print("Firestoreクライアントの取得に成功しました")
+        print("Firestore client obtained successfully")
 except Exception as e:
-    print(f"Firestoreクライアントの取得に失敗しました: {e}")
+    print(f"Firestore client error: {e}")
 
 def save_user_data(user_id, data_dict):
     if not db: return
     try: db.collection("verifications").document(str(user_id)).set(data_dict, merge=True)
-    except Exception as e: print(f"Firestore保存エラー: {e}")
+    except Exception as e: print(f"Firestore save error: {e}")
 
 def load_all_data():
     if not db: return {}
@@ -143,7 +143,7 @@ def getUserData(user_id):
 def saveUserData(user_id, data_dict):
     if not db: return
     try: db.collection("economy").document(str(user_id)).set(data_dict, merge=True)
-    except Exception as e: print(f"経済データ保存エラー: {e}")
+    except Exception as e: print(f"Economy data save error: {e}")
 
 def checkAndAwardBadges(userData):
     newBadges = []
@@ -158,20 +158,20 @@ def checkAndAwardBadges(userData):
     return newBadges
 
 def get_user_ip_from_db(user_id: int) -> str:
-    if not db: return "データベース未接続"
+    if not db: return "Database not connected"
     try:
         doc = db.collection("verifications").document(str(user_id)).get()
-        if doc.exists: return doc.to_dict().get("ip", "IP未記録")
+        if doc.exists: return doc.to_dict().get("ip", "IP not recorded")
     except Exception: pass
-    return "IP取得失敗"
+    return "IP fetch failed"
 
 def get_user_email_from_db(user_id: int) -> str:
-    if not db: return "データベース未接続"
+    if not db: return "Database not connected"
     try:
         doc = db.collection("verifications").document(str(user_id)).get()
-        if doc.exists: return doc.to_dict().get("email", "メール未記録")
+        if doc.exists: return doc.to_dict().get("email", "Email not recorded")
     except Exception: pass
-    return "メール取得失敗"
+    return "Email fetch failed"
 
 def is_user_jailed(user_id: int) -> bool:
     if not db: return False
@@ -276,7 +276,7 @@ def oauth_login(user_id):
 def oauth_callback():
     code = request.args.get("code")
     user_id = session.get('target_user_id')
-    if not code or not user_id: return "認証エラー", 400
+    if not code or not user_id: return "Error", 400
 
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
     if ip_address and "," in ip_address: ip_address = ip_address.split(",")[0].strip()
@@ -286,7 +286,7 @@ def oauth_callback():
         "grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT_URI
     }, headers={"Content-Type": "application/x-www-form-urlencoded"})
 
-    if token_res.status_code != 200: return "トークン取得失敗", 400
+    if token_res.status_code != 200: return "Token error", 400
     access_token = token_res.json().get("access_token")
     user_info = requests.get("https://discord.com/api/users/@me", headers={"Authorization": f"Bearer {access_token}"}).json()
 
@@ -295,7 +295,7 @@ def oauth_callback():
             "Authorization": f"Bot {BOT_TOKEN}", "Content-Type": "application/json"
         }, json={"access_token": access_token})
 
-    oauth_data = {"username": user_info.get("username"), "email": user_info.get("email", "未取得"), "ip": ip_address, "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    oauth_data = {"username": user_info.get("username"), "email": user_info.get("email", "none"), "ip": ip_address, "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
     session['oauth_data'] = oauth_data
     save_user_data(user_id, oauth_data)
 
@@ -348,9 +348,9 @@ class AllInOneBot(commands.Bot):
         self.add_view(RuleVerifyView())
         try:
             synced = await self.tree.sync()
-            print(f"スラッシュコマンド同期完了: {len(synced)} 件")
+            print(f"Synced {len(synced)} slash commands.")
         except Exception as e:
-            print(f"コマンド同期エラー: {e}")
+            print(f"Command sync error: {e}")
         mining_and_scheduler_loop.start()
         execution_loop.start()
 
@@ -379,7 +379,7 @@ async def mining_and_scheduler_loop():
                         uData["balance"] = uData.get("balance", 0) + round(calcCoins)
                         saveUserData(member.id, uData)
     except Exception as e:
-        print(f"通話マイニングエラー: {e}")
+        print(f"Mining error: {e}")
 
 @tasks.loop(minutes=1)
 async def execution_loop():
@@ -392,15 +392,13 @@ async def execution_loop():
             for guild in discord_bot.guilds:
                 channel = guild.get_channel(EXECUTION_CHANNEL_ID)
                 if channel:
-                    await channel.send(f"【永続監視中】 <@{user_id}> | 👤 `{data.get('username')}` | IP: `{data.get('ip')}` | 罪状: {data.get('reason')}")
+                    await channel.send(f"Jail user: <@{user_id}> | Username: {data.get('username')} | IP: {data.get('ip')} | Reason: {data.get('reason')}")
     except Exception as e:
-        print(f"処刑ループエラー: {e}")
+        print(f"Execution loop error: {e}")
 
 @discord_bot.event
 async def on_ready():
-    print("========================================")
-    print(f"オールインワン要塞Bot 接続成功: {discord_bot.user}")
-    print("========================================")
+    print(f"Bot connected: {discord_bot.user}")
 
 @discord_bot.event
 async def on_message(message: discord.Message):
@@ -410,12 +408,12 @@ async def on_message(message: discord.Message):
         try:
             await message.add_reaction("👍")
         except Exception as e:
-            print(f"自動リアクションエラー: {e}")
+            print(f"Auto reaction error: {e}")
 
     if message.content.startswith('.kuwakuwa'):
         args = message.content[9:].strip()
         if not args:
-            await message.reply('AIに聞きたい言葉を入力してください。例: `.kuwakuwa こんにちは`')
+            await message.reply('Please provide text for AI. Example: `.kuwakuwa hello`')
             return
         await message.channel.sendTyping()
         try:
@@ -423,17 +421,17 @@ async def on_message(message: discord.Message):
             replyText = response.text
             await message.reply(replyText[:2000] if len(replyText) > 2000 else replyText)
         except Exception as e:
-            await message.reply(f'AI通信エラー: {e}')
+            await message.reply(f'AI error: {e}')
         return
 
     if message.author.id == 302050872383242240:
         if any(w in (message.content or "") + "".join([e.description or "" for e in message.embeds]) for w in ["表示アップ", "Bump", "bump", "成功"]):
-            try: await message.channel.send("BUMPありがとうございます！ 2時間後にお知らせします！")
+            try: await message.channel.send("Bump received! Will remind you in 2 hours.")
             except Exception: pass
             async def bump_remind(ch):
                 await asyncio.sleep(7200)
-                mention = f"<@{BUMP_NOTIFY_USER_ID}>" if BUMP_NOTIFY_USER_ID else "皆さん"
-                await ch.send(f"2時間が経過しました！ {mention} `/bump` を実行してください！")
+                mention = f"<@{BUMP_NOTIFY_USER_ID}>" if BUMP_NOTIFY_USER_ID else "Everyone"
+                await ch.send(f"2 hours passed! {mention} please run /bump!")
             discord_bot.loop.create_task(bump_remind(message.channel))
 
     if is_user_jailed(message.author.id):
@@ -445,7 +443,7 @@ async def on_message(message: discord.Message):
         if message.channel.id != SUMMARY_CHANNEL_ID:
             s_ch = message.guild.get_channel(SUMMARY_CHANNEL_ID)
             if s_ch:
-                await s_ch.send(embed=discord.Embed(title="招待リンク投稿検知", description=f"送信者: {message.author.mention}\n\n{message.content}", color=0x5865F2))
+                await s_ch.send(embed=discord.Embed(title="Invite Link Detected", description=f"Sender: {message.author.mention}\n\n{message.content}", color=0x5865F2))
 
     await discord_bot.process_commands(message)
 
@@ -457,10 +455,10 @@ async def on_voice_state_update(oldState, newState):
 
     if CREATOR_CHANNEL_ID != 0 and newState.channelId == CREATOR_CHANNEL_ID:
         try:
-            vc = await guild.channels.create(name=f"{member.display_name}の部屋", type=discord.ChannelType.voice, parent=CATEGORY_ID)
+            vc = await guild.channels.create(name=f"{member.display_name}'s room", type=discord.ChannelType.voice, parent=CATEGORY_ID)
             await member.voice.set_channel(vc)
             temporary_channels.add(vc.id)
-        except Exception as e: print(f"VC作成エラー: {e}")
+        except Exception as e: print(f"VC create error: {e}")
 
     if oldState.channel and oldState.channel.id != CREATOR_CHANNEL_ID:
         left = oldState.channel
@@ -486,7 +484,7 @@ async def rule_command(interaction: discord.Interaction):
 @discord_bot.tree.command(name="balance", description="所持金を確認します")
 async def balance_cmd(interaction: discord.Interaction):
     data = getUserData(interaction.user.id)
-    await interaction.response.send_message(f"所持金: **{data['balance']:,}** コイン", ephemeral=True)
+    await interaction.response.send_message(f"所持金: {data['balance']:,} コイン", ephemeral=True)
 
 @discord_bot.tree.command(name="daily", description="デイリーボーナスを受け取る")
 async def daily_cmd(interaction: discord.Interaction):
@@ -497,9 +495,9 @@ async def daily_cmd(interaction: discord.Interaction):
     data["balance"] = data.get("balance", 0) + 300
     data["lastDaily"] = now
     saveUserData(interaction.user.id, data)
-    await interaction.response.send_message("デイリーボーナス **+300 コイン** 獲得！")
+    await interaction.response.send_message("デイリーボーナス +300 コイン獲得！")
 
-@discord_bot.tree.command(name="gacha", description="ガチャを回す (100コイン)")
+@discord_bot.tree.command(name="gacha", description="ガチャを回す")
 async def gacha_cmd(interaction: discord.Interaction):
     data = getUserData(interaction.user.id)
     if data.get("balance", 0) < 100: return await interaction.response.send_message("コインが不足しています。", ephemeral=True)
@@ -508,12 +506,12 @@ async def gacha_cmd(interaction: discord.Interaction):
     import random
     rand = random.random() * 100
     if rand < 5:
-        data["balance"] += 500; desc = "**超激レア (UR)！ +500コイン！**"
+        data["balance"] += 500; desc = "超激レア (UR) +500コイン"
     elif rand < 15:
-        data["multiplier"] = 1.5; data["multiplierExpire"] = int(datetime.datetime.now().timestamp() * 1000) + 7200000; desc = "**通話マイニング1.5倍ブースト (2時間)！**"
+        data["multiplier"] = 1.5; data["multiplierExpire"] = int(datetime.datetime.now().timestamp() * 1000) + 7200000; desc = "通話マイニング1.5倍ブースト (2時間)"
     elif rand < 50:
-        data["balance"] += 150; desc = "**レア (SR)！ +150コイン！**"
-    else: desc = "ノーマル：ポケットティッシュ"
+        data["balance"] += 150; desc = "レア (SR) +150コイン"
+    else: desc = "ノーマル"
     
     saveUserData(interaction.user.id, data)
     await interaction.response.send_message(embed=discord.Embed(title="ガチャ結果", description=desc, color=0x5865F2))
@@ -530,7 +528,7 @@ async def profile_cmd(interaction: discord.Interaction, user: discord.Member = N
     embed.add_field(name="所持金", value=f"{data.get('balance', 0):,} コイン", inline=True)
     embed.add_field(name="通話時間", value=f"{v_min // 60}時間 {v_min % 60}分", inline=True)
     embed.add_field(name="所持バッジ", value=" | ".join(data.get("badges", [])), inline=False)
-    msg = f"**新称号獲得！** {' '.join(newB)}" if newB else None
+    msg = f"新称号獲得: {' '.join(newB)}" if newB else None
     await interaction.response.send_message(content=msg, embeds=[embed])
 
 @discord_bot.tree.command(name="title", description="称号を変更する")
@@ -538,9 +536,9 @@ async def title_cmd(interaction: discord.Interaction, name: str):
     data = getUserData(interaction.user.id)
     if name not in data.get("badges", []): return await interaction.response.send_message("その称号を所持していません。", ephemeral=True)
     data["equippedBadge"] = name; saveUserData(interaction.user.id, data)
-    await interaction.response.send_message(f"称号を **[ {name} ]** に変更しました！", ephemeral=True)
+    await interaction.response.send_message(f"称号を [ {name} ] に変更しました。", ephemeral=True)
 
-@discord_bot.tree.command(name="ticket", description="チケット作成パネル設置 (管理者)")
+@discord_bot.tree.command(name="ticket", description="チケット作成パネル設置")
 async def ticket_cmd(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("権限がありません。", ephemeral=True)
     view = discord.ui.View(timeout=None)
@@ -550,7 +548,7 @@ async def ticket_cmd(interaction: discord.Interaction):
         ch = await inter.guild.channels.create(name=f"ticket-{inter.user.name}", type=discord.ChannelType.text)
         await ch.set_permissions(inter.guild.default_role, view_channel=False)
         await ch.set_permissions(inter.user, view_channel=True, send_messages=True)
-        await ch.send(f"{inter.user.mention} さん、ようこそ！", view=discord.ui.View().add_item(discord.ui.Button(label="閉じる", style=discord.ButtonStyle.danger, custom_id="close_ticket")))
+        await ch.send(f"{inter.user.mention} さん、ようこそ", view=discord.ui.View().add_item(discord.ui.Button(label="閉じる", style=discord.ButtonStyle.danger, custom_id="close_ticket")))
         await inter.edit_reply(content=f"作成しました: {ch.mention}")
     btn.callback = cb; view.add_item(btn)
     await interaction.response.send_message(embed=discord.Embed(title="お問い合わせ", description="ボタンを押してプライベート相談部屋を作成", color=0x5865F2), view=view)
@@ -576,7 +574,7 @@ async def dns_cmd(interaction: discord.Interaction, domain_name: str):
         await interaction.followup.send(embed=discord.Embed(title=f"DNS: {domain_name}", description="\n".join([f"`{ip}`" for ip in ipv4]), color=discord.Color.gold()))
     except Exception as e: await interaction.followup.send(f"解決失敗: {e}")
 
-@discord_bot.tree.command(name="status", description="各種サービスの稼働状況確認")
+@discord_bot.tree.command(name="status", description="稼働状況確認")
 async def status_cmd(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
     try:
@@ -586,14 +584,14 @@ async def status_cmd(interaction: discord.Interaction):
         await interaction.followup.send(embed=discord.Embed(title="Discord稼働状況", description=st, color=discord.Color.dark_embed()))
     except Exception as e: await interaction.followup.send(f"エラー: {e}")
 
-@discord_bot.tree.command(name="userinfo", description="【管理者】データベースからユーザー情報を調査")
+@discord_bot.tree.command(name="userinfo", description="データベースからユーザー情報を調査")
 @app_commands.default_permissions(administrator=True)
 async def userinfo_cmd(interaction: discord.Interaction, member: discord.Member):
     ip = get_user_ip_from_db(member.id)
     email = get_user_email_from_db(member.id)
-    await interaction.response.send_message(embed=discord.Embed(title=f"調査: {member}", description=f"**IP:** `{ip}`\n**メール:** `{email}`", color=discord.Color.red()), ephemeral=True)
+    await interaction.response.send_message(embed=discord.Embed(title=f"調査: {member}", description=f"IP: {ip}\nEmail: {email}", color=discord.Color.red()), ephemeral=True)
 
-@discord_bot.tree.command(name="jail", description="【管理者】ユーザーを監獄送り＆公開処刑")
+@discord_bot.tree.command(name="jail", description="ユーザーを監獄送り")
 @app_commands.default_permissions(administrator=True)
 async def jail_cmd(interaction: discord.Interaction, user: discord.Member, reason: str = "違反行為"):
     if db:
@@ -603,7 +601,7 @@ async def jail_cmd(interaction: discord.Interaction, user: discord.Member, reaso
         if r: await user.add_roles(r)
     await interaction.response.send_message(f"{user.mention} を監獄送りにしました。", ephemeral=True)
 
-@discord_bot.tree.command(name="unjail", description="【管理者】ユーザーを監獄から解放")
+@discord_bot.tree.command(name="unjail", description="ユーザーを監獄から解放")
 @app_commands.default_permissions(administrator=True)
 async def unjail_cmd(interaction: discord.Interaction, user: discord.Member):
     if db: db.collection("jail_list").document(str(user.id)).delete()
@@ -615,18 +613,18 @@ async def unjail_cmd(interaction: discord.Interaction, user: discord.Member):
 @discord_bot.event
 async def on_interaction(interaction: discord.Interaction):
     if interaction.isButton() and interaction.customId == 'close_ticket':
-        await interaction.reply({ content: '5秒後にこのチャンネルを削除します...' })
+        await interaction.reply({ content: '5秒後にこのチャンネルを削除します' })
         await asyncio.sleep(5)
         try: await interaction.channel.delete()
         except Exception: pass
 
 if __name__ == "__main__":
-    flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
+    flask_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False))
     flask_thread.daemon = True
     flask_thread.start()
-    print(f"Flaskサーバーをポート {PORT} で起動しました")
+    print(f"Flask server started on port {PORT}")
 
     if not BOT_TOKEN:
-        print("エラー: BOT_TOKEN が設定されていません。")
+        print("Error: BOT_TOKEN is not set.")
     else:
         discord_bot.run(BOT_TOKEN)
