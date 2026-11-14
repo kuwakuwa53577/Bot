@@ -17,8 +17,8 @@ from flask import Flask, render_template_string, request, jsonify, redirect, ses
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-from google.genai import GoogleGenAI
-ai = GoogleGenAI(api_key=os.getenv("GEMINI_API_KEY"))
+from google.genai import Client
+ai = Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 logging.basicConfig(level=logging.INFO)
 
