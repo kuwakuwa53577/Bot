@@ -23,7 +23,18 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from google.genai import Client
-ai = Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+# Gemini AI Client の初期化
+ai = None
+try:
+    api_key_val = os.getenv("GEMINI_API_KEY")
+    if api_key_val:
+        ai = Client(api_key=api_key_val)
+        print("Google GenAI Client initialized successfully.")
+    else:
+        print("⚠️ GEMINI_API_KEY が設定されていません。")
+except Exception as e:
+    print(f"Google GenAI Client init error: {e}")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -50,6 +61,7 @@ CATEGORY_ID = int(CATEGORY_ID) if CATEGORY_ID.isdigit() and CATEGORY_ID != "0" e
 
 TARGET_CHANNEL_ID = int(os.getenv("TARGET_CHANNEL_ID", "0"))
 MILESTONE_CHANNEL_ID = int(os.getenv("MILESTONE_CHANNEL_ID", str(WELCOME_CHANNEL_ID)))
+RANKING_CHANNEL_ID = int(os.getenv("RANKING_CHANNEL_ID", str(TARGET_CHANNEL_ID))) # ランキング送信先（未設定ならTARGET_CHANNEL_ID）
 JST = ZoneInfo("Asia/Tokyo")
 
 BUMP_CHANNEL_ID = int(os.getenv("BUMP_CHANNEL_ID", "0"))
@@ -93,6 +105,7 @@ TITLE_BONUSES = {
 }
 
 temporary_channels = set()
+message_count_cache = {}  # 週間メッセージ送信数カウント用
 
 firebase_creds_json = os.getenv("FIREBASE_CREDENTIALS")
 if firebase_creds_json:
@@ -390,10 +403,12 @@ class AllInOneBot(commands.Bot):
         except Exception as e:
             print(f"Command sync error: {e}")
         
+        # APScheduler (朝・夕・夜の挨拶 および 毎週月曜9:00のメッセージランキング)
         scheduler = AsyncIOScheduler(timezone=JST)
         scheduler.add_job(job_morning, CronTrigger(hour=7, minute=0, timezone=JST))
         scheduler.add_job(job_evening, CronTrigger(hour=16, minute=30, timezone=JST))
         scheduler.add_job(job_night, CronTrigger(hour=22, minute=0, timezone=JST))
+        scheduler.add_job(job_weekly_ranking, CronTrigger(day_of_week='mon', hour=9, minute=0, timezone=JST))
         scheduler.start()
 
         mining_and_scheduler_loop.start()
@@ -489,6 +504,38 @@ async def job_night():
     ch = await get_target_channel()
     if ch: await ch.send("夜ですね。そろそろ休みましょう。")
 
+# 【新規追加】毎週月曜9:00にメッセージ送信数ランキングを送信するジョブ
+async def job_weekly_ranking():
+    global message_count_cache
+    target_ch_id = RANKING_CHANNEL_ID if RANKING_CHANNEL_ID != 0 else TARGET_CHANNEL_ID
+    if target_ch_id == 0: return
+    
+    try:
+        channel = discord_bot.get_channel(target_ch_id) or await discord_bot.fetch_channel(target_ch_id)
+        if not channel: return
+
+        if not message_count_cache:
+            await channel.send("📊 【週間メッセージランキング】\n先週はメッセージの記録がありませんでした！")
+            return
+
+        sorted_ranking = sorted(message_count_cache.items(), key=lambda x: x[1], reverse=True)[:10]
+        
+        description = ""
+        for i, (uid, count) in enumerate(sorted_ranking, 1):
+            medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"`#{i}`"))
+            description += f"{medal} <@{uid}> : **{count}** 回\n"
+
+        embed = discord.Embed(
+            title="🏆 先週のメッセージ送信数ランキング",
+            description=description,
+            color=discord.Color.blurple(),
+            timestamp=datetime.datetime.now()
+        )
+        await channel.send(embed=embed)
+        message_count_cache.clear()
+    except Exception as e:
+        print(f"Weekly ranking job error: {e}")
+
 @tasks.loop(minutes=1)
 async def mining_and_scheduler_loop():
     try:
@@ -548,6 +595,11 @@ async def on_message(message: discord.Message):
     if not message.guild:
         return
 
+    # メッセージ送信数カウントの集計
+    global message_count_cache
+    if not message.author.bot:
+        message_count_cache[message.author.id] = message_count_cache.get(message.author.id, 0) + 1
+
     if message.author.id == 302050872383242240:
         embed_texts = []
         for e in message.embeds:
@@ -581,18 +633,28 @@ async def on_message(message: discord.Message):
         try: await message.add_reaction("👍")
         except Exception: pass
 
+    # Gemini AI 連携コマンド (.kuwakuwa) の修正部分
     if message.content.startswith('.kuwakuwa'):
         args = message.content[9:].strip()
         if not args:
             await message.reply('Please provide text for AI.')
             return
+        
+        if not ai:
+            await message.reply('❌ Gemini API Client が初期化されていません（GEMINI_API_KEY を確認してください）。')
+            return
+
         await message.channel.sendTyping()
         try:
-            response = ai.models.generate_content(model='gemini-2.5-flash', contents=args)
+            # 正しい google-genai SDK 呼び出し
+            response = ai.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=args
+            )
             replyText = response.text
             await message.reply(replyText[:2000] if len(replyText) > 2000 else replyText)
         except Exception as e:
-            await message.reply(f'AI error: {e}')
+            await message.reply(f'❌ AI error: {e}')
         return
 
     if is_user_jailed(message.author.id):
@@ -714,7 +776,6 @@ async def ticket_cmd(interaction: discord.Interaction):
     btn.callback = cb; view.add_item(btn)
     await interaction.response.send_message(embed=discord.Embed(title="お問い合わせ", description="ボタンを押してプライベート相談部屋を作成", color=0x5865F2), view=view)
 
-# ※Discordの引数の最大制限（25個）に収まるよう、最大10個（合計20個の引数）までに安全に調整しています
 @discord_bot.tree.command(name="reaction_role", description="【管理者専用】最大10個のロール付与ボタンパネルを作成します")
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(
